@@ -210,16 +210,17 @@ export async function purgeDeletedEntity(
   preview: PurgePreview,
   operationId: string = crypto.randomUUID()
 ): Promise<number> {
-  const latest = await createPurgePreview(
-    database,
-    preview.entityType,
-    preview.entityId
-  )
-  if (!latest.canPurge) {
-    throw new Error(`仍有引用，不能永久删除：${latest.blockers.join('；')}`)
-  }
   const now = new Date().toISOString()
+  let deletedCount = 0
   await database.transaction('rw', database.tables, async () => {
+    const latest = await createPurgePreview(
+      database,
+      preview.entityType,
+      preview.entityId
+    )
+    if (!latest.canPurge) {
+      throw new Error(`仍有引用，不能永久删除：${latest.blockers.join('；')}`)
+    }
     if (latest.entityType === 'mouse') {
       const eventIds = (
         await database.mouseEvents.where('mouseId').equals(latest.entityId).toArray()
@@ -248,6 +249,7 @@ export async function purgeDeletedEntity(
       await database.tags.delete(latest.entityId)
     }
     await addPurgeAudit(database, latest, operationId, now)
+    deletedCount = sumCounts(latest.deleteCounts)
   })
-  return sumCounts(latest.deleteCounts)
+  return deletedCount
 }

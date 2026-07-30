@@ -300,10 +300,16 @@ export async function scanIntegrity(
     )
 
     const mouseById = new Map(mice.map(mouse => [mouse.id, mouse]))
+    const mouseIds = new Set(mouseById.keys())
     const cageIds = new Set(cages.map(cage => cage.id))
+    const breedingPairById = new Map(
+      breedingPairs.map(pair => [pair.id, pair])
+    )
+    const litterById = new Map(litters.map(litter => [litter.id, litter]))
     const experimentIds = new Set(
       experiments.map(experiment => experiment.id)
     )
+    const tagIds = new Set(tags.map(tag => tag.id))
     const groupExperimentById = new Map(
       experimentGroups.map(group => [group.id, group.experimentId])
     )
@@ -326,8 +332,106 @@ export async function scanIntegrity(
           })
         }
       }
+      if (mouse.litterId) {
+        const litter = litterById.get(mouse.litterId)
+        if (!litter) {
+          issues.push({
+            severity: 'error',
+            code: 'missing-litter',
+            table: 'mice',
+            recordId: mouse.id,
+            relatedIds: [mouse.litterId],
+            message: `Mouse references missing litter ${mouse.litterId}`
+          })
+        } else if (
+          mouse.sireId !== litter.sireId ||
+          mouse.damId !== litter.damId ||
+          mouse.birthDate !== litter.bornOn
+        ) {
+          issues.push({
+            severity: 'error',
+            code: 'litter-offspring-mismatch',
+            table: 'mice',
+            recordId: mouse.id,
+            relatedIds: [litter.id],
+            message:
+              'Mouse litter link does not match the litter parents and birth date'
+          })
+        }
+      }
+      for (const tagId of mouse.tagIds) {
+        if (!tagIds.has(tagId)) {
+          issues.push({
+            severity: 'error',
+            code: 'missing-tag',
+            table: 'mice',
+            recordId: mouse.id,
+            relatedIds: [tagId],
+            message: `Mouse references missing tag ${tagId}`
+          })
+        }
+      }
     }
     issues.push(...findPedigreeCycles(mice))
+
+    for (const pair of breedingPairs) {
+      for (const [role, mouseId] of [
+        ['sire', pair.sireId],
+        ['dam', pair.damId]
+      ] as const) {
+        if (!mouseIds.has(mouseId)) {
+          issues.push({
+            severity: 'error',
+            code: `missing-${role}`,
+            table: 'breedingPairs',
+            recordId: pair.id,
+            relatedIds: [mouseId],
+            message: `Breeding pair references missing ${role} ${mouseId}`
+          })
+        }
+      }
+    }
+
+    for (const litter of litters) {
+      const pair = breedingPairById.get(litter.breedingPairId)
+      if (!pair) {
+        issues.push({
+          severity: 'error',
+          code: 'missing-breeding-pair',
+          table: 'litters',
+          recordId: litter.id,
+          relatedIds: [litter.breedingPairId],
+          message: `Litter references missing breeding pair ${litter.breedingPairId}`
+        })
+      } else if (
+        pair.sireId !== litter.sireId ||
+        pair.damId !== litter.damId
+      ) {
+        issues.push({
+          severity: 'error',
+          code: 'litter-pair-mismatch',
+          table: 'litters',
+          recordId: litter.id,
+          relatedIds: [pair.id],
+          message: 'Litter parents do not match its breeding pair'
+        })
+      }
+      for (const [role, mouseId] of [
+        ['sire', litter.sireId],
+        ['dam', litter.damId]
+      ] as const) {
+        if (!mouseIds.has(mouseId)) {
+          issues.push({
+            severity: 'error',
+            code: `missing-${role}`,
+            table: 'litters',
+            recordId: litter.id,
+            relatedIds: [mouseId],
+            message: `Litter references missing ${role} ${mouseId}`
+          })
+        }
+      }
+    }
 
     for (const assignment of cageAssignments) {
       if (!mouseById.has(assignment.mouseId)) {
@@ -390,17 +494,95 @@ export async function scanIntegrity(
       checkExperimentAssignment(
         assignment,
         groupExperimentById.get(assignment.groupId),
-        new Set(mouseById.keys()),
+        mouseIds,
         experimentIds,
         issues
       )
     }
 
+    for (const group of experimentGroups) {
+      if (!experimentIds.has(group.experimentId)) {
+        issues.push({
+          severity: 'error',
+          code: 'missing-experiment',
+          table: 'experimentGroups',
+          recordId: group.id,
+          relatedIds: [group.experimentId],
+          message: `Experiment group references missing experiment ${group.experimentId}`
+        })
+      }
+    }
+
+    const activeExperimentMemberships = new Map<string, string>()
+    for (const assignment of experimentAssignments) {
+      if (assignment.activeFlag !== 1 || assignment.deletedFlag !== 0) {
+        continue
+      }
+      const key = `${assignment.experimentId}:${assignment.mouseId}`
+      const previous = activeExperimentMemberships.get(key)
+      if (previous) {
+        issues.push({
+          severity: 'error',
+          code: 'multiple-active-experiment-memberships',
+          table: 'experimentAssignments',
+          recordId: assignment.id,
+          relatedIds: [previous, assignment.id, assignment.mouseId],
+          message:
+            'Mouse has more than one active assignment in the same experiment'
+        })
+      } else {
+        activeExperimentMemberships.set(key, assignment.id)
+      }
+    }
+
     for (const weight of weightRecords) {
+      if (!mouseIds.has(weight.mouseId)) {
+        issues.push({
+          severity: 'error',
+          code: 'missing-mouse',
+          table: 'weightRecords',
+          recordId: weight.id,
+          relatedIds: [weight.mouseId],
+          message: `Weight record references missing mouse ${weight.mouseId}`
+        })
+      }
       checkWeightEventPair(weight, eventById.get(weight.eventId), issues)
     }
 
     for (const event of mouseEvents) {
+      if (!mouseIds.has(event.mouseId)) {
+        issues.push({
+          severity: 'error',
+          code: 'missing-mouse',
+          table: 'mouseEvents',
+          recordId: event.id,
+          relatedIds: [event.mouseId],
+          message: `Mouse event references missing mouse ${event.mouseId}`
+        })
+      }
+      if (event.cageId && !cageIds.has(event.cageId)) {
+        issues.push({
+          severity: 'error',
+          code: 'missing-cage',
+          table: 'mouseEvents',
+          recordId: event.id,
+          relatedIds: [event.cageId],
+          message: `Mouse event references missing cage ${event.cageId}`
+        })
+      }
+      if (
+        event.experimentId &&
+        !experimentIds.has(event.experimentId)
+      ) {
+        issues.push({
+          severity: 'error',
+          code: 'missing-experiment',
+          table: 'mouseEvents',
+          recordId: event.id,
+          relatedIds: [event.experimentId],
+          message: `Mouse event references missing experiment ${event.experimentId}`
+        })
+      }
       if (
         event.eventType === 'weight' &&
         !weightRecords.some(weight => weight.eventId === event.id)
@@ -412,6 +594,25 @@ export async function scanIntegrity(
           recordId: event.id,
           message: 'Weight event has no matching WeightRecord'
         })
+      }
+    }
+
+    for (const task of tasks) {
+      for (const [field, id, ids] of [
+        ['mouse', task.mouseId, mouseIds],
+        ['cage', task.cageId, cageIds],
+        ['experiment', task.experimentId, experimentIds]
+      ] as const) {
+        if (id && !ids.has(id)) {
+          issues.push({
+            severity: 'error',
+            code: `missing-${field}`,
+            table: 'tasks',
+            recordId: task.id,
+            relatedIds: [id],
+            message: `Task references missing ${field} ${id}`
+          })
+        }
       }
     }
 
@@ -432,4 +633,3 @@ export async function scanIntegrity(
     }
   })
 }
-

@@ -439,14 +439,11 @@ export class MouseKeeperService {
       if (!parentId) {
         continue
       }
-      const parent = await this.database.mice.get(parentId)
-      if (!parent) {
-        throw new ServiceError(
-          'invalid-reference',
-          `Parent mouse ${parentId} was not found`,
-          { mouseId: mouse.id, parentId }
-        )
-      }
+      const parent = await this.activeRecord(
+        this.database.mice,
+        parentId,
+        'Parent mouse'
+      )
       if (
         mouse.birthDate &&
         parent.birthDate &&
@@ -494,6 +491,25 @@ export class MouseKeeperService {
     for (const tagId of mouse.tagIds) {
       await this.activeRecord(this.database.tags, tagId, 'Tag')
     }
+
+    if (mouse.litterId) {
+      const litter = await this.activeRecord(
+        this.database.litters,
+        mouse.litterId,
+        'Litter'
+      )
+      if (
+        mouse.sireId !== litter.sireId ||
+        mouse.damId !== litter.damId ||
+        mouse.birthDate !== litter.bornOn
+      ) {
+        throw new ServiceError(
+          'invalid-state',
+          'A mouse linked to a litter must use that litter’s parents and birth date',
+          { mouseId: mouse.id, litterId: litter.id }
+        )
+      }
+    }
   }
 
   async createMouse(
@@ -505,6 +521,7 @@ export class MouseKeeperService {
       [
         this.database.mice,
         this.database.tags,
+        this.database.litters,
         this.database.activityLogs
       ],
       async () => {
@@ -605,6 +622,7 @@ export class MouseKeeperService {
       [
         this.database.mice,
         this.database.tags,
+        this.database.litters,
         this.database.cages,
         this.database.cageAssignments,
         this.database.mouseEvents,
@@ -666,7 +684,12 @@ export class MouseKeeperService {
     }
     return this.database.transaction(
       'rw',
-      [this.database.mice, this.database.tags, this.database.activityLogs],
+      [
+        this.database.mice,
+        this.database.tags,
+        this.database.litters,
+        this.database.activityLogs
+      ],
       async () => {
         const results: CommandResult<Mouse>[] = []
         for (const [index, entry] of input.entries.entries()) {
@@ -801,6 +824,23 @@ export class MouseKeeperService {
         const results: CommandResult<Mouse>[] = []
         const skipped: Mouse[] = []
         for (const [index, target] of input.targets.entries()) {
+          const childOperationId = `${input.operationId}:${index}`
+          const replay = await this.operationLog(
+            childOperationId,
+            'mouse.set-tags'
+          )
+          if (replay) {
+            const replayed = await this.setMouseTags({
+              operationId: childOperationId,
+              now: input.now,
+              origin: input.origin,
+              mouseId: target.mouseId,
+              expectedRevision: target.expectedRevision,
+              tagIds: []
+            })
+            results.push(replayed)
+            continue
+          }
           const current = await this.activeRecord(
             this.database.mice,
             target.mouseId,
@@ -822,7 +862,7 @@ export class MouseKeeperService {
           }
           results.push(
             await this.setMouseTags({
-              operationId: `${input.operationId}:${index}`,
+              operationId: childOperationId,
               now: input.now,
               origin: input.origin,
               mouseId: target.mouseId,
@@ -862,6 +902,7 @@ export class MouseKeeperService {
       [
         this.database.mice,
         this.database.tags,
+        this.database.litters,
         this.database.activityLogs
       ],
       async () => {
@@ -3884,7 +3925,12 @@ export class MouseKeeperService {
     const action = 'mouse.restore'
     return this.database.transaction(
       'rw',
-      [this.database.mice, this.database.tags, this.database.activityLogs],
+      [
+        this.database.mice,
+        this.database.tags,
+        this.database.litters,
+        this.database.activityLogs
+      ],
       async () => {
         const replay = await this.operationLog(input.operationId, action)
         if (replay) {

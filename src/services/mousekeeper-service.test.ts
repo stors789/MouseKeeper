@@ -245,7 +245,7 @@ describe('MouseKeeperService', () => {
         name: 'Batch tag'
       })
     ).value
-    const tagged = await service.setMiceTags({
+    const tagBatchInput = {
       operationId: operationId('batch-tags'),
       now: NOW,
       targets: status.value.mice.map(mouse => ({
@@ -253,11 +253,40 @@ describe('MouseKeeperService', () => {
         expectedRevision: mouse.revision
       })),
       addTagIds: [tag.id]
-    })
+    }
+    const tagged = await service.setMiceTags(tagBatchInput)
     expect(tagged.value.updatedMouseIds).toHaveLength(2)
     expect(
       tagged.value.mice.every(mouse => mouse.tagIds.includes(tag.id))
     ).toBe(true)
+    const tagReplay = await service.setMiceTags(tagBatchInput)
+    expect(tagReplay.replayed).toBe(true)
+    expect(tagReplay.value.updatedMouseIds).toEqual(
+      tagged.value.updatedMouseIds
+    )
+  })
+
+  it('rejects dangling litter references without partial writes', async () => {
+    await expect(
+      service.createMouse({
+        operationId: operationId('missing-litter'),
+        now: NOW,
+        id: 'missing-litter-child',
+        earTag: 'MISSING-LITTER',
+        strain: 'C57BL/6J',
+        sex: 'unknown',
+        birthDate: '2025-01-01',
+        litterId: 'missing-litter'
+      })
+    ).rejects.toMatchObject({ code: 'not-found' })
+
+    expect(await database.mice.get('missing-litter-child')).toBeUndefined()
+    expect(
+      await database.activityLogs
+        .where('operationId')
+        .startsWith('missing-litter')
+        .count()
+    ).toBe(0)
   })
 
   it('blocks self-parenting and pedigree cycles', async () => {
@@ -792,5 +821,37 @@ describe('MouseKeeperService', () => {
     const report = await scanIntegrity(database)
     expect(report.ok).toBe(true)
     expect(report.issues).toEqual([])
+  })
+
+  it('reports dangling secondary relations during integrity scans', async () => {
+    const tag = (
+      await service.createTag({
+        operationId: operationId('integrity-tag'),
+        now: NOW,
+        name: 'Integrity tag'
+      })
+    ).value
+    const mouse = (
+      await service.createMouse({
+        operationId: operationId('integrity-tagged-mouse'),
+        now: NOW,
+        earTag: 'INTEGRITY-TAGGED',
+        strain: 'C57BL/6J',
+        sex: 'unknown',
+        tagIds: [tag.id]
+      })
+    ).value
+
+    await database.tags.delete(tag.id)
+    const report = await scanIntegrity(database)
+
+    expect(report.ok).toBe(false)
+    expect(report.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'missing-tag',
+        table: 'mice',
+        recordId: mouse.id
+      })
+    )
   })
 })

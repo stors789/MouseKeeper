@@ -27,7 +27,7 @@ const FORMULA_PREFIX = /^[=+\-@\t\r]/
 
 function toIssue(error: ParseError): CsvIssue {
   return {
-    rowNumber: typeof error.row === 'number' ? error.row + 2 : null,
+    rowNumber: typeof error.row === 'number' ? error.row + 1 : null,
     code: error.code,
     message: error.message
   }

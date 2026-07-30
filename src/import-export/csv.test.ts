@@ -24,6 +24,7 @@ describe('CSV utilities', () => {
 
     expect(result.rows).toHaveLength(1)
     expect(result.issues.length).toBeGreaterThan(0)
+    expect(result.issues[0]?.rowNumber).toBe(2)
     expect(result.issues[0]?.message).toMatch(/quote/i)
   })
 

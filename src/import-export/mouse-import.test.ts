@@ -91,4 +91,19 @@ describe('mouse CSV import preview', () => {
       status: 'alive'
     })
   })
+
+  it('blocks rows affected by CSV parser errors', () => {
+    const parsed = parseCsvPreview(
+      'earTag,strain,notes\nA-01,C57BL/6J,"unterminated'
+    )
+    const result = validateMouseImport(
+      parsed,
+      suggestMouseFieldMapping(parsed.headers),
+      { today: '2026-07-30' }
+    )
+
+    expect(parsed.issues.length).toBeGreaterThan(0)
+    expect(result.validCount).toBe(0)
+    expect(result.rows[0]?.errors.join(' ')).toContain('CSV 解析错误')
+  })
 })

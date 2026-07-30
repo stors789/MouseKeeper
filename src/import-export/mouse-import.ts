@@ -203,7 +203,12 @@ export function validateMouseImport(
   const today = context.today ?? todayLocalDate()
 
   const rows = preview.rows.map((row): MouseImportRowResult => {
-    const errors: string[] = []
+    const errors = preview.issues
+      .filter(
+        (issue) =>
+          issue.rowNumber === null || issue.rowNumber === row.rowNumber
+      )
+      .map((issue) => `CSV 解析错误：${issue.message}`)
     const warnings: string[] = []
     const id = mappedValue(row, mapping, 'id')
     const earTag = mappedValue(row, mapping, 'earTag')
