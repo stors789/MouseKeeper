@@ -1,0 +1,47 @@
+# Dependencies and generated application output
+node_modules/
+dist/
+build/
+coverage/
+.vite/
+.cache/
+.eslintcache
+*.tsbuildinfo
+
+# Test artifacts
+playwright-report/
+test-results/
+blob-report/
+screenshots/
+videos/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.token
+
+# Local exports and real research data
+backups/
+exports/
+local-data/
+user-data/
+*.mousekeeper-backup.json
+*.mousekeeper-export.csv
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.log
