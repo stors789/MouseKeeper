@@ -1,13 +1,26 @@
 import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { CheckCircle2, ListTodo, Plus } from 'lucide-react'
+import {
+  Check,
+  CheckCircle2,
+  FilePenLine,
+  ListRestart,
+  ListTodo,
+  Plus,
+  Trash2,
+  X
+} from 'lucide-react'
 import { Link } from 'wouter'
-import { buttonClassName } from '../../components/ui/Button'
+import { Alert } from '../../components/ui/Alert'
+import { Button, buttonClassName } from '../../components/ui/Button'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { Skeleton, SkeletonGroup } from '../../components/ui/Skeleton'
 import { StatusChip } from '../../components/ui/StatusChip'
 import { db } from '../../db'
 import type { Task, TaskStatus } from '../../domain'
+import { appService } from '../../app/runtime'
+import { useToast } from '../../hooks/useToast'
+import { readableError } from '../../lib/errors'
 import { formatLocalDate } from '../../lib/format'
 import {
   TASK_PRIORITY_LABELS,
@@ -31,6 +44,7 @@ function taskTone(task: Task) {
 }
 
 export function TasksPage() {
+  const { showToast } = useToast()
   const tasks = useLiveQuery(
     () =>
       db.tasks
@@ -44,11 +58,60 @@ export function TasksPage() {
     []
   )
   const [status, setStatus] = useState<TaskStatus | 'all'>('pending')
+  const [busy, setBusy] = useState<string>()
+  const [error, setError] = useState<string>()
   const visible = useMemo(
     () =>
       tasks?.filter((task) => status === 'all' || task.status === status) ?? [],
     [status, tasks]
   )
+
+  const setTaskStatus = async (task: Task, nextStatus: TaskStatus) => {
+    setBusy(task.id)
+    setError(undefined)
+    try {
+      await appService.setTaskStatus({
+        operationId: crypto.randomUUID(),
+        taskId: task.id,
+        expectedRevision: task.revision,
+        status: nextStatus
+      })
+      showToast({
+        title:
+          nextStatus === 'completed'
+            ? '任务已完成'
+            : nextStatus === 'cancelled'
+              ? '任务已取消'
+              : '任务已恢复',
+        tone: nextStatus === 'cancelled' ? 'warning' : 'positive'
+      })
+    } catch (actionError) {
+      setError(readableError(actionError))
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
+  const deleteTask = async (task: Task) => {
+    setBusy(task.id)
+    setError(undefined)
+    try {
+      await appService.softDeleteTask({
+        operationId: crypto.randomUUID(),
+        taskId: task.id,
+        expectedRevision: task.revision
+      })
+      showToast({
+        title: '任务已移入回收站',
+        description: '可在“数据与安全”页面恢复。',
+        tone: 'warning'
+      })
+    } catch (actionError) {
+      setError(readableError(actionError))
+    } finally {
+      setBusy(undefined)
+    }
+  }
 
   return (
     <div className="feature-page">
@@ -66,6 +129,12 @@ export function TasksPage() {
           新建任务
         </Link>
       </header>
+
+      {error ? (
+        <Alert title="任务操作没有完成" tone="critical">
+          {error}
+        </Alert>
+      ) : null}
 
       <div className="segmented-tabs" role="tablist" aria-label="任务状态">
         {(
@@ -139,6 +208,58 @@ export function TasksPage() {
                   }
                   tone={tone}
                 />
+                <div className="row-actions">
+                  <Link
+                    className={buttonClassName({
+                      variant: 'tertiary',
+                      size: 'small'
+                    })}
+                    href={`/tasks/${encodeURIComponent(task.id)}/edit`}
+                  >
+                    <FilePenLine aria-hidden="true" size={15} />
+                    编辑
+                  </Link>
+                  {task.status === 'pending' ? (
+                    <>
+                      <Button
+                        size="small"
+                        variant="secondary"
+                        loading={busy === task.id}
+                        leadingIcon={<Check aria-hidden="true" size={15} />}
+                        onClick={() => void setTaskStatus(task, 'completed')}
+                      >
+                        完成
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="tertiary"
+                        disabled={busy === task.id}
+                        leadingIcon={<X aria-hidden="true" size={15} />}
+                        onClick={() => void setTaskStatus(task, 'cancelled')}
+                      >
+                        取消
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      size="small"
+                      variant="secondary"
+                      loading={busy === task.id}
+                      leadingIcon={<ListRestart aria-hidden="true" size={15} />}
+                      onClick={() => void setTaskStatus(task, 'pending')}
+                    >
+                      恢复
+                    </Button>
+                  )}
+                  <Button
+                    aria-label={`删除任务 ${task.title}`}
+                    size="icon"
+                    variant="tertiary"
+                    disabled={busy === task.id}
+                    leadingIcon={<Trash2 aria-hidden="true" size={15} />}
+                    onClick={() => void deleteTask(task)}
+                  />
+                </div>
               </li>
             )
           })}
