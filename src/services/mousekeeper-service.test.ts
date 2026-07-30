@@ -289,6 +289,59 @@ describe('MouseKeeperService', () => {
     ).toBe(0)
   })
 
+  it('creates, updates, and recycles saved views with scoped uniqueness', async () => {
+    const created = await service.createSavedView({
+      operationId: operationId('saved-view-create'),
+      now: NOW,
+      scope: 'mice',
+      name: 'Breeding females',
+      filters: { sex: 'female', status: 'breeding' },
+      sort: { field: 'updatedAt', direction: 'desc' }
+    })
+    expect(created.value).toMatchObject({
+      normalizedName: 'breeding females',
+      deletedFlag: 0
+    })
+    expect(created.value.activeScopeNameKey).toBeDefined()
+    await expect(
+      service.createSavedView({
+        operationId: operationId('saved-view-duplicate'),
+        now: NOW,
+        scope: 'mice',
+        name: 'ＢＲＥＥＤＩＮＧ ＦＥＭＡＬＥＳ',
+        filters: {},
+        sort: {}
+      })
+    ).rejects.toMatchObject({ code: 'duplicate-id' })
+
+    const updated = await service.updateSavedView({
+      operationId: operationId('saved-view-update'),
+      now: NOW,
+      savedViewId: created.value.id,
+      expectedRevision: created.value.revision,
+      patch: { name: 'Current breeding females' }
+    })
+    expect(updated.value.name).toBe('Current breeding females')
+
+    const deleted = await service.softDeleteSavedView({
+      operationId: operationId('saved-view-delete'),
+      now: NOW,
+      savedViewId: updated.value.id,
+      expectedRevision: updated.value.revision
+    })
+    expect(deleted.value.deletedFlag).toBe(1)
+    const restored = await service.restoreSavedView({
+      operationId: operationId('saved-view-restore'),
+      now: NOW,
+      savedViewId: deleted.value.id,
+      expectedRevision: deleted.value.revision
+    })
+    expect(restored.value).toMatchObject({
+      deletedFlag: 0,
+      name: 'Current breeding females'
+    })
+  })
+
   it('blocks self-parenting and pedigree cycles', async () => {
     await expect(
       service.createMouse({

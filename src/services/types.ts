@@ -19,6 +19,8 @@ import type {
   MouseEvent,
   MouseSex,
   MouseStatus,
+  SavedView,
+  SavedViewScope,
   Tag,
   TaskPriority,
   TaskStatus,
@@ -120,6 +122,40 @@ export interface MouseTagBatchValue {
   mice: Mouse[]
   updatedMouseIds: string[]
   skippedMouseIds: string[]
+}
+
+export interface CreateSavedViewInput extends CommandContext {
+  id?: string
+  scope: SavedViewScope
+  name: string
+  filters: JsonValue
+  sort: JsonValue
+  columns?: JsonValue
+}
+
+export interface UpdateSavedViewInput extends CommandContext {
+  savedViewId: string
+  expectedRevision: number
+  patch: {
+    name?: string
+    filters?: JsonValue
+    sort?: JsonValue
+    columns?: JsonValue | null
+  }
+}
+
+export interface SoftDeleteSavedViewInput extends CommandContext {
+  savedViewId: string
+  expectedRevision?: number
+}
+
+export interface RestoreSavedViewInput extends CommandContext {
+  savedViewId: string
+  expectedRevision?: number
+}
+
+export interface SavedViewValue {
+  savedView: SavedView
 }
 
 export interface CreateMouseWithCageInput extends CreateMouseInput {

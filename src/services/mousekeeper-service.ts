@@ -24,6 +24,7 @@ import {
   mouseSchema,
   normalizeOptionalText,
   normalizeText,
+  savedViewSchema,
   tagSchema,
   taskSchema,
   weightRecordSchema
@@ -44,6 +45,7 @@ import type {
   Litter,
   Mouse,
   MouseEvent,
+  SavedView,
   StoredEntity,
   Tag,
   Task,
@@ -74,6 +76,7 @@ import type {
   CreateMouseInput,
   CreateMouseWithCageInput,
   CreateMouseWithCageValue,
+  CreateSavedViewInput,
   CreateTagInput,
   CreateTaskInput,
   DeleteSampleBatchInput,
@@ -97,12 +100,14 @@ import type {
   RestoreCageInput,
   RestoreExperimentInput,
   RestoreMouseInput,
+  RestoreSavedViewInput,
   RestoreTagInput,
   RestoreTaskInput,
   SampleDataResult,
   SetMouseTagsInput,
   SetMiceTagsInput,
   SetTaskStatusInput,
+  SoftDeleteSavedViewInput,
   SoftDeleteCageInput,
   SoftDeleteExperimentInput,
   SoftDeleteMouseEventInput,
@@ -117,6 +122,7 @@ import type {
   UpdateMouseInput,
   UpdateMouseEventInput,
   UpdateTaskInput,
+  UpdateSavedViewInput,
   WeightBatchValue,
   WeightEntryValue
 } from './types'
@@ -4289,6 +4295,304 @@ export class MouseKeeperService {
           resultEntityIds: [experiment.id]
         })
         return { value: experiment, replayed: false, warnings: [] }
+      }
+    )
+  }
+
+  async createSavedView(
+    input: CreateSavedViewInput
+  ): Promise<CommandResult<SavedView>> {
+    const action = 'saved-view.create'
+    return this.database.transaction(
+      'rw',
+      [this.database.savedViews, this.database.activityLogs],
+      async () => {
+        const replay = await this.operationLog(input.operationId, action)
+        if (replay) {
+          const savedView = await this.database.savedViews.get(
+            this.resultId(replay)
+          )
+          if (!savedView) {
+            throw new ServiceError(
+              'integrity-error',
+              'Saved view referenced by activity log is missing'
+            )
+          }
+          return { value: savedView, replayed: true, warnings: [] }
+        }
+        const activeScopeNameKey = makeCompositeKey(
+          'saved-view',
+          input.scope,
+          input.name
+        )
+        if (!activeScopeNameKey) {
+          throw new ServiceError(
+            'invalid-state',
+            'Saved view name cannot be empty'
+          )
+        }
+        if (
+          (await this.database.savedViews
+            .where('activeScopeNameKey')
+            .equals(activeScopeNameKey)
+            .first())
+        ) {
+          throw new ServiceError(
+            'duplicate-id',
+            `Saved view ${input.name} already exists in ${input.scope}`
+          )
+        }
+        const now = resolveNow(input)
+        const savedView: SavedView = savedViewSchema.parse({
+          ...baseFields(input, input.id ?? newId(), now),
+          scope: input.scope,
+          name: input.name,
+          normalizedName: normalizeText(input.name),
+          activeScopeNameKey,
+          queryVersion: 1,
+          filters: input.filters,
+          sort: input.sort,
+          columns: input.columns,
+          lastUsedAt: now
+        })
+        if (await this.database.savedViews.get(savedView.id)) {
+          throw new ServiceError(
+            'duplicate-id',
+            `Saved view ${savedView.id} already exists`
+          )
+        }
+        await this.database.savedViews.add(savedView)
+        await this.addActivity(input, now, {
+          action,
+          primaryEntityType: 'savedView',
+          primaryEntityId: savedView.id,
+          summary: `Created saved view ${savedView.name}`,
+          resultEntityIds: [savedView.id]
+        })
+        return { value: savedView, replayed: false, warnings: [] }
+      }
+    )
+  }
+
+  async updateSavedView(
+    input: UpdateSavedViewInput
+  ): Promise<CommandResult<SavedView>> {
+    const action = 'saved-view.update'
+    return this.database.transaction(
+      'rw',
+      [this.database.savedViews, this.database.activityLogs],
+      async () => {
+        const replay = await this.operationLog(input.operationId, action)
+        if (replay) {
+          const savedView = await this.database.savedViews.get(
+            this.resultId(replay)
+          )
+          if (!savedView) {
+            throw new ServiceError(
+              'integrity-error',
+              'Updated saved view referenced by activity log is missing'
+            )
+          }
+          return { value: savedView, replayed: true, warnings: [] }
+        }
+        const current = await this.activeRecord(
+          this.database.savedViews,
+          input.savedViewId,
+          'Saved view'
+        )
+        this.assertRevision(current, input.expectedRevision)
+        const name = input.patch.name ?? current.name
+        const activeScopeNameKey = makeCompositeKey(
+          'saved-view',
+          current.scope,
+          name
+        )
+        if (!activeScopeNameKey) {
+          throw new ServiceError(
+            'invalid-state',
+            'Saved view name cannot be empty'
+          )
+        }
+        if (activeScopeNameKey !== current.activeScopeNameKey) {
+          const duplicate = await this.database.savedViews
+            .where('activeScopeNameKey')
+            .equals(activeScopeNameKey)
+            .first()
+          if (duplicate && duplicate.id !== current.id) {
+            throw new ServiceError(
+              'duplicate-id',
+              `Saved view ${name} already exists in ${current.scope}`
+            )
+          }
+        }
+        const columns =
+          'columns' in input.patch
+            ? input.patch.columns ?? undefined
+            : current.columns
+        const changedFields = (
+          ['name', 'filters', 'sort', 'columns'] as const
+        ).filter(field => {
+          if (!(field in input.patch)) return false
+          const nextValue =
+            field === 'name'
+              ? name
+              : field === 'columns'
+                ? columns
+                : input.patch[field]
+          return JSON.stringify(nextValue) !== JSON.stringify(current[field])
+        })
+        if (changedFields.length === 0) {
+          throw new ServiceError('invalid-state', 'Saved view is unchanged')
+        }
+        const now = resolveNow(input)
+        const savedView: SavedView = savedViewSchema.parse({
+          ...current,
+          revision: current.revision + 1,
+          updatedAt: now,
+          name,
+          normalizedName: normalizeText(name),
+          activeScopeNameKey,
+          filters: input.patch.filters ?? current.filters,
+          sort: input.patch.sort ?? current.sort,
+          columns,
+          lastUsedAt: now
+        })
+        await this.database.savedViews.put(savedView)
+        await this.addActivity(input, now, {
+          action,
+          primaryEntityType: 'savedView',
+          primaryEntityId: savedView.id,
+          summary: `Updated saved view ${savedView.name}`,
+          changedFields,
+          resultEntityIds: [savedView.id]
+        })
+        return { value: savedView, replayed: false, warnings: [] }
+      }
+    )
+  }
+
+  async softDeleteSavedView(
+    input: SoftDeleteSavedViewInput
+  ): Promise<CommandResult<SavedView>> {
+    const action = 'saved-view.soft-delete'
+    return this.database.transaction(
+      'rw',
+      [this.database.savedViews, this.database.activityLogs],
+      async () => {
+        const replay = await this.operationLog(input.operationId, action)
+        if (replay) {
+          const savedView = await this.database.savedViews.get(
+            this.resultId(replay)
+          )
+          if (!savedView) {
+            throw new ServiceError(
+              'integrity-error',
+              'Deleted saved view referenced by activity log is missing'
+            )
+          }
+          return { value: savedView, replayed: true, warnings: [] }
+        }
+        const current = await this.activeRecord(
+          this.database.savedViews,
+          input.savedViewId,
+          'Saved view'
+        )
+        this.assertRevision(current, input.expectedRevision)
+        const now = resolveNow(input)
+        const savedView: SavedView = savedViewSchema.parse({
+          ...current,
+          revision: current.revision + 1,
+          updatedAt: now,
+          deletedAt: now,
+          deletedFlag: 1,
+          activeScopeNameKey: undefined
+        })
+        await this.database.savedViews.put(savedView)
+        await this.addActivity(input, now, {
+          action,
+          primaryEntityType: 'savedView',
+          primaryEntityId: savedView.id,
+          summary: `Deleted saved view ${savedView.name}`,
+          resultEntityIds: [savedView.id]
+        })
+        return { value: savedView, replayed: false, warnings: [] }
+      }
+    )
+  }
+
+  async restoreSavedView(
+    input: RestoreSavedViewInput
+  ): Promise<CommandResult<SavedView>> {
+    const action = 'saved-view.restore'
+    return this.database.transaction(
+      'rw',
+      [this.database.savedViews, this.database.activityLogs],
+      async () => {
+        const replay = await this.operationLog(input.operationId, action)
+        if (replay) {
+          const savedView = await this.database.savedViews.get(
+            this.resultId(replay)
+          )
+          if (!savedView) {
+            throw new ServiceError(
+              'integrity-error',
+              'Restored saved view referenced by activity log is missing'
+            )
+          }
+          return { value: savedView, replayed: true, warnings: [] }
+        }
+        const current = await this.database.savedViews.get(input.savedViewId)
+        if (!current) {
+          throw new ServiceError(
+            'not-found',
+            `Saved view ${input.savedViewId} not found`
+          )
+        }
+        if (current.deletedFlag === 0) {
+          throw new ServiceError('invalid-state', 'Saved view is not deleted')
+        }
+        this.assertRevision(current, input.expectedRevision)
+        const activeScopeNameKey = makeCompositeKey(
+          'saved-view',
+          current.scope,
+          current.name
+        )
+        if (!activeScopeNameKey) {
+          throw new ServiceError(
+            'invalid-state',
+            'Saved view name cannot be empty'
+          )
+        }
+        if (
+          await this.database.savedViews
+            .where('activeScopeNameKey')
+            .equals(activeScopeNameKey)
+            .first()
+        ) {
+          throw new ServiceError(
+            'duplicate-id',
+            `Saved view ${current.name} already exists in ${current.scope}`
+          )
+        }
+        const now = resolveNow(input)
+        const savedView: SavedView = savedViewSchema.parse({
+          ...current,
+          revision: current.revision + 1,
+          updatedAt: now,
+          deletedAt: null,
+          deletedFlag: 0,
+          activeScopeNameKey,
+          lastUsedAt: now
+        })
+        await this.database.savedViews.put(savedView)
+        await this.addActivity(input, now, {
+          action,
+          primaryEntityType: 'savedView',
+          primaryEntityId: savedView.id,
+          summary: `Restored saved view ${savedView.name}`,
+          resultEntityIds: [savedView.id]
+        })
+        return { value: savedView, replayed: false, warnings: [] }
       }
     )
   }
