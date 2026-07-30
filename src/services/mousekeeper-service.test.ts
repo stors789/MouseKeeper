@@ -196,6 +196,70 @@ describe('MouseKeeperService', () => {
     ).toBeUndefined()
   })
 
+  it('applies mouse status, cage, and tag batches atomically', async () => {
+    const cage = await createCage('BATCH-CAGE', 1)
+    const first = await createMouse('BATCH-MOUSE-1')
+    const second = await createMouse('BATCH-MOUSE-2')
+    const moveInput = {
+      operationId: operationId('batch-move'),
+      now: NOW,
+      mouseIds: [first.id, second.id],
+      cageId: cage.id
+    }
+
+    await expect(service.moveMice(moveInput)).rejects.toBeInstanceOf(
+      WarningRequiredError
+    )
+    expect(await database.cageAssignments.count()).toBe(0)
+    expect((await database.mice.get(first.id))?.currentCageId).toBeUndefined()
+
+    const moved = await service.moveMice({
+      ...moveInput,
+      warningAcknowledgements: [WARNING_CODES.cageCapacityExceeded]
+    })
+    expect(moved.value.assignments).toHaveLength(2)
+    expect(
+      moved.value.mice.every(mouse => mouse.currentCageId === cage.id)
+    ).toBe(true)
+
+    const status = await service.changeMiceStatus({
+      operationId: operationId('batch-status'),
+      now: NOW,
+      targets: moved.value.mice.map(mouse => ({
+        mouseId: mouse.id,
+        expectedRevision: mouse.revision
+      })),
+      status: 'reserved',
+      occurredOn: TODAY,
+      reason: 'batch review'
+    })
+    expect(status.value.mice.map(mouse => mouse.status)).toEqual([
+      'reserved',
+      'reserved'
+    ])
+
+    const tag = (
+      await service.createTag({
+        operationId: operationId('batch-tag-create'),
+        now: NOW,
+        name: 'Batch tag'
+      })
+    ).value
+    const tagged = await service.setMiceTags({
+      operationId: operationId('batch-tags'),
+      now: NOW,
+      targets: status.value.mice.map(mouse => ({
+        mouseId: mouse.id,
+        expectedRevision: mouse.revision
+      })),
+      addTagIds: [tag.id]
+    })
+    expect(tagged.value.updatedMouseIds).toHaveLength(2)
+    expect(
+      tagged.value.mice.every(mouse => mouse.tagIds.includes(tag.id))
+    ).toBe(true)
+  })
+
   it('blocks self-parenting and pedigree cycles', async () => {
     await expect(
       service.createMouse({

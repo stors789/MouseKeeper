@@ -80,6 +80,48 @@ export interface MouseBatchCreationValue {
   mice: Mouse[]
 }
 
+export interface BatchMouseTarget {
+  mouseId: string
+  expectedRevision: number
+}
+
+export interface ChangeMiceStatusInput extends CommandContext {
+  targets: readonly BatchMouseTarget[]
+  status: MouseStatus
+  occurredOn: LocalDate
+  occurredTime?: LocalTime
+  reason?: string
+}
+
+export interface MouseStatusBatchValue {
+  mice: Mouse[]
+  events: MouseEvent[]
+}
+
+export interface MoveMiceInput extends CommandContext {
+  mouseIds: readonly string[]
+  cageId: string
+  reason?: string
+}
+
+export interface MouseMoveBatchValue {
+  mice: Mouse[]
+  assignments: CageAssignment[]
+  events: MouseEvent[]
+}
+
+export interface SetMiceTagsInput extends CommandContext {
+  targets: readonly BatchMouseTarget[]
+  addTagIds?: readonly string[]
+  removeTagIds?: readonly string[]
+}
+
+export interface MouseTagBatchValue {
+  mice: Mouse[]
+  updatedMouseIds: string[]
+  skippedMouseIds: string[]
+}
+
 export interface CreateMouseWithCageInput extends CreateMouseInput {
   initialCageId?: string
   initialCageReason?: string

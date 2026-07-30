@@ -57,6 +57,7 @@ import { WARNING_CODES } from './types'
 import type {
   AssignMouseToExperimentInput,
   AssignMiceToExperimentInput,
+  ChangeMiceStatusInput,
   ChangeMouseStatusInput,
   CommandContext,
   CommandResult,
@@ -84,7 +85,11 @@ import type {
   LitterCreationValue,
   MoveMouseInput,
   MoveMouseValue,
+  MoveMiceInput,
   MouseBatchCreationValue,
+  MouseMoveBatchValue,
+  MouseStatusBatchValue,
+  MouseTagBatchValue,
   RecordWeightInput,
   RecordWeightsInput,
   RestoreCageInput,
@@ -94,6 +99,7 @@ import type {
   RestoreTaskInput,
   SampleDataResult,
   SetMouseTagsInput,
+  SetMiceTagsInput,
   SetTaskStatusInput,
   SoftDeleteCageInput,
   SoftDeleteExperimentInput,
@@ -189,6 +195,21 @@ function baseFields(
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values)]
+}
+
+function requireUniqueBatchIds(ids: readonly string[], label: string): void {
+  if (ids.length === 0) {
+    throw new ServiceError(
+      'invalid-state',
+      `At least one ${label} is required`
+    )
+  }
+  if (new Set(ids).size !== ids.length) {
+    throw new ServiceError(
+      'invalid-state',
+      `Duplicate ${label} values are not allowed`
+    )
+  }
 }
 
 function withoutEmpty(value: string | null | undefined): string | undefined {
@@ -667,6 +688,166 @@ export class MouseKeeperService {
           warnings: [
             ...new Set(results.flatMap(result => [...result.warnings]))
           ]
+        }
+      }
+    )
+  }
+
+  async changeMiceStatus(
+    input: ChangeMiceStatusInput
+  ): Promise<CommandResult<MouseStatusBatchValue>> {
+    requireUniqueBatchIds(
+      input.targets.map(target => target.mouseId),
+      'mouse target'
+    )
+    return this.database.transaction(
+      'rw',
+      this.database.tables,
+      async () => {
+        const results: CommandResult<StatusChangeValue>[] = []
+        for (const [index, target] of input.targets.entries()) {
+          results.push(
+            await this.changeMouseStatus({
+              operationId: `${input.operationId}:${index}`,
+              now: input.now,
+              origin: input.origin,
+              warningAcknowledgements: input.warningAcknowledgements,
+              mouseId: target.mouseId,
+              expectedRevision: target.expectedRevision,
+              status: input.status,
+              occurredOn: input.occurredOn,
+              occurredTime: input.occurredTime,
+              reason: input.reason
+            })
+          )
+        }
+        return {
+          value: {
+            mice: results.map(result => result.value.mouse),
+            events: results.map(result => result.value.event)
+          },
+          replayed: results.every(result => result.replayed),
+          warnings: [
+            ...new Set(results.flatMap(result => [...result.warnings]))
+          ]
+        }
+      }
+    )
+  }
+
+  async moveMice(
+    input: MoveMiceInput
+  ): Promise<CommandResult<MouseMoveBatchValue>> {
+    requireUniqueBatchIds(input.mouseIds, 'mouse ID')
+    return this.database.transaction(
+      'rw',
+      this.database.tables,
+      async () => {
+        const results: CommandResult<MoveMouseValue>[] = []
+        for (const [index, mouseId] of input.mouseIds.entries()) {
+          results.push(
+            await this.moveMouse({
+              operationId: `${input.operationId}:${index}`,
+              now: input.now,
+              origin: input.origin,
+              warningAcknowledgements: input.warningAcknowledgements,
+              mouseId,
+              cageId: input.cageId,
+              reason: input.reason
+            })
+          )
+        }
+        return {
+          value: {
+            mice: results.map(result => result.value.mouse),
+            assignments: results.map(result => result.value.assignment),
+            events: results.map(result => result.value.event)
+          },
+          replayed: results.every(result => result.replayed),
+          warnings: [
+            ...new Set(results.flatMap(result => [...result.warnings]))
+          ]
+        }
+      }
+    )
+  }
+
+  async setMiceTags(
+    input: SetMiceTagsInput
+  ): Promise<CommandResult<MouseTagBatchValue>> {
+    requireUniqueBatchIds(
+      input.targets.map(target => target.mouseId),
+      'mouse target'
+    )
+    const addTagIds = uniqueStrings(input.addTagIds ?? [])
+    const removeTagIds = uniqueStrings(input.removeTagIds ?? [])
+    if (addTagIds.length === 0 && removeTagIds.length === 0) {
+      throw new ServiceError(
+        'invalid-state',
+        'At least one tag change is required'
+      )
+    }
+    if (addTagIds.some(tagId => removeTagIds.includes(tagId))) {
+      throw new ServiceError(
+        'invalid-state',
+        'The same tag cannot be added and removed in one batch'
+      )
+    }
+
+    return this.database.transaction(
+      'rw',
+      this.database.tables,
+      async () => {
+        const results: CommandResult<Mouse>[] = []
+        const skipped: Mouse[] = []
+        for (const [index, target] of input.targets.entries()) {
+          const current = await this.activeRecord(
+            this.database.mice,
+            target.mouseId,
+            'Mouse'
+          )
+          this.assertRevision(current, target.expectedRevision)
+          const nextTagIds = uniqueStrings([
+            ...current.tagIds.filter(
+              tagId => !removeTagIds.includes(tagId)
+            ),
+            ...addTagIds
+          ])
+          if (
+            nextTagIds.length === current.tagIds.length &&
+            nextTagIds.every(tagId => current.tagIds.includes(tagId))
+          ) {
+            skipped.push(current)
+            continue
+          }
+          results.push(
+            await this.setMouseTags({
+              operationId: `${input.operationId}:${index}`,
+              now: input.now,
+              origin: input.origin,
+              mouseId: target.mouseId,
+              expectedRevision: target.expectedRevision,
+              tagIds: nextTagIds
+            })
+          )
+        }
+        if (results.length === 0) {
+          throw new ServiceError(
+            'invalid-state',
+            'Selected mouse tags are already unchanged'
+          )
+        }
+        return {
+          value: {
+            mice: [
+              ...results.map(result => result.value),
+              ...skipped
+            ],
+            updatedMouseIds: results.map(result => result.value.id),
+            skippedMouseIds: skipped.map(mouse => mouse.id)
+          },
+          replayed: results.every(result => result.replayed),
+          warnings: []
         }
       }
     )
