@@ -67,6 +67,7 @@ import type {
   CreateExperimentWithInitialGroupInput,
   CreateLitterInput,
   CreateMouseEventInput,
+  CreateMiceInput,
   CreateMouseInput,
   CreateTagInput,
   CreateTaskInput,
@@ -81,6 +82,7 @@ import type {
   LitterCreationValue,
   MoveMouseInput,
   MoveMouseValue,
+  MouseBatchCreationValue,
   RecordWeightInput,
   RecordWeightsInput,
   RestoreCageInput,
@@ -568,6 +570,44 @@ export class MouseKeeperService {
           resultEntityIds: [mouse.id]
         })
         return { value: mouse, replayed: false, warnings: [] }
+      }
+    )
+  }
+
+  async createMice(
+    input: CreateMiceInput
+  ): Promise<CommandResult<MouseBatchCreationValue>> {
+    if (input.entries.length === 0) {
+      throw new ServiceError(
+        'invalid-state',
+        'At least one mouse entry is required'
+      )
+    }
+    return this.database.transaction(
+      'rw',
+      [this.database.mice, this.database.tags, this.database.activityLogs],
+      async () => {
+        const results: CommandResult<Mouse>[] = []
+        for (const [index, entry] of input.entries.entries()) {
+          results.push(
+            await this.createMouse({
+              operationId: `${input.operationId}:${index}`,
+              now: input.now,
+              origin: input.origin,
+              sampleBatchId: input.sampleBatchId,
+              importBatchId: input.importBatchId,
+              warningAcknowledgements: input.warningAcknowledgements,
+              ...entry
+            })
+          )
+        }
+        return {
+          value: { mice: results.map(result => result.value) },
+          replayed: results.every(result => result.replayed),
+          warnings: [
+            ...new Set(results.flatMap(result => [...result.warnings]))
+          ]
+        }
       }
     )
   }

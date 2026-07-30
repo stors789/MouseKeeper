@@ -72,6 +72,14 @@ export interface CreateMouseInput extends CommandContext {
   custom?: Record<string, JsonValue>
 }
 
+export interface CreateMiceInput extends CommandContext {
+  entries: ReadonlyArray<Omit<CreateMouseInput, keyof CommandContext>>
+}
+
+export interface MouseBatchCreationValue {
+  mice: Mouse[]
+}
+
 export interface UpdateMousePatch {
   earTag?: string | null
   experimentNumber?: string | null
