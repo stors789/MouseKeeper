@@ -10,6 +10,7 @@ interface FieldControlProps {
   id?: string
   'aria-describedby'?: string
   'aria-invalid'?: boolean
+  'aria-required'?: boolean
   invalid?: boolean
 }
 
@@ -42,6 +43,7 @@ export function Field({
         id,
         'aria-describedby': describedBy || undefined,
         'aria-invalid': error ? true : undefined,
+        'aria-required': required || undefined,
         invalid: error ? true : undefined
       })
     : children

@@ -200,6 +200,9 @@ export function CageFormPage({ cageId }: { cageId?: string }) {
               render={({ field }) => (
                 <Field id="cage-status" label="状态" required>
                   <Select
+                    ref={field.ref}
+                    name={field.name}
+                    onBlur={field.onBlur}
                     options={CAGE_STATUSES.map((value) => ({
                       value,
                       label: CAGE_STATUS_LABELS[value]

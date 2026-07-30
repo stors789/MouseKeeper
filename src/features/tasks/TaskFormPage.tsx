@@ -197,6 +197,9 @@ export function TaskFormPage({ taskId }: { taskId?: string }) {
               render={({ field }) => (
                 <Field id="task-priority" label="优先级" required>
                   <Select
+                    ref={field.ref}
+                    name={field.name}
+                    onBlur={field.onBlur}
                     options={TASK_PRIORITIES.map((value) => ({
                       value,
                       label: TASK_PRIORITY_LABELS[value]
@@ -225,6 +228,9 @@ export function TaskFormPage({ taskId }: { taskId?: string }) {
               render={({ field }) => (
                 <Field id="task-mouse" label="小鼠">
                   <Select
+                    ref={field.ref}
+                    name={field.name}
+                    onBlur={field.onBlur}
                     placeholder="未关联"
                     options={(options?.mice ?? []).map((mouse) => ({
                       value: mouse.id,
@@ -242,6 +248,9 @@ export function TaskFormPage({ taskId }: { taskId?: string }) {
               render={({ field }) => (
                 <Field id="task-cage" label="笼位">
                   <Select
+                    ref={field.ref}
+                    name={field.name}
+                    onBlur={field.onBlur}
                     placeholder="未关联"
                     options={(options?.cages ?? []).map((cage) => ({
                       value: cage.id,
@@ -259,6 +268,9 @@ export function TaskFormPage({ taskId }: { taskId?: string }) {
               render={({ field }) => (
                 <Field id="task-experiment" label="实验">
                   <Select
+                    ref={field.ref}
+                    name={field.name}
+                    onBlur={field.onBlur}
                     placeholder="未关联"
                     options={(options?.experiments ?? []).map((experiment) => ({
                       value: experiment.id,

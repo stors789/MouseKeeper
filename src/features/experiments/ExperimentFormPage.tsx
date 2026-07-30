@@ -263,6 +263,9 @@ export function ExperimentFormPage({
               render={({ field }) => (
                 <Field id="experiment-status" label="状态" required>
                   <Select
+                    ref={field.ref}
+                    name={field.name}
+                    onBlur={field.onBlur}
                     options={EXPERIMENT_STATUSES.map((value) => ({
                       value,
                       label: EXPERIMENT_STATUS_LABELS[value]
@@ -361,6 +364,9 @@ export function ExperimentFormPage({
                 render={({ field }) => (
                   <Field id="initial-group-type" label="组别类型" required>
                     <Select
+                      ref={field.ref}
+                      name={field.name}
+                      onBlur={field.onBlur}
                       options={EXPERIMENT_GROUP_TYPES.map((value) => ({
                         value,
                         label: EXPERIMENT_GROUP_TYPE_LABELS[value]

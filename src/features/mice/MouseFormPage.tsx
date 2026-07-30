@@ -383,6 +383,9 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
               render={({ field }) => (
                 <Field id="mouse-sex" label="性别" required>
                   <Select
+                    ref={field.ref}
+                    name={field.name}
+                    onBlur={field.onBlur}
                     options={MOUSE_SEXES.map((value) => ({
                       value,
                       label: MOUSE_SEX_LABELS[value]
@@ -448,6 +451,9 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
                 render={({ field }) => (
                   <Field id="mouse-status" label="当前状态" required>
                     <Select
+                      ref={field.ref}
+                      name={field.name}
+                      onBlur={field.onBlur}
                       options={MOUSE_STATUSES.map((value) => ({
                         value,
                         label: MOUSE_STATUS_LABELS[value]
@@ -466,6 +472,9 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
                 render={({ field }) => (
                   <Field id="mouse-cage" label="初始笼位">
                     <Select
+                      ref={field.ref}
+                      name={field.name}
+                      onBlur={field.onBlur}
                       placeholder="暂不分配"
                       options={(options?.cages ?? []).map((cage) => ({
                         value: cage.id,
@@ -490,6 +499,9 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
               render={({ field }) => (
                 <Field id="mouse-sire" label="父本">
                   <Select
+                    ref={field.ref}
+                    name={field.name}
+                    onBlur={field.onBlur}
                     placeholder="未关联"
                     options={(options?.mice ?? []).map((mouse) => ({
                       value: mouse.id,
@@ -511,6 +523,9 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
                   error={errors.damId?.message}
                 >
                   <Select
+                    ref={field.ref}
+                    name={field.name}
+                    onBlur={field.onBlur}
                     placeholder="未关联"
                     options={(options?.mice ?? []).map((mouse) => ({
                       value: mouse.id,
