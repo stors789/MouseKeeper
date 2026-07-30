@@ -229,6 +229,44 @@ describe('MouseKeeperService', () => {
     })
   })
 
+  it('updates breeding dates and releases the active pair key on separation', async () => {
+    const sire = await createMouse('UPDATE-SIRE', { sex: 'male' })
+    const dam = await createMouse('UPDATE-DAM', { sex: 'female' })
+    const pair = (
+      await service.createBreedingPair({
+        operationId: operationId('update-pair-create'),
+        now: NOW,
+        sireId: sire.id,
+        damId: dam.id,
+        pairedOn: '2026-07-01',
+        expectedDeliveryDate: '2026-07-22'
+      })
+    ).value
+    const input = {
+      operationId: operationId('update-pair'),
+      now: '2026-07-30T09:00:00.000Z',
+      breedingPairId: pair.id,
+      expectedRevision: pair.revision,
+      patch: {
+        status: 'separated' as const,
+        separatedOn: TODAY,
+        notes: 'Separated after litter'
+      }
+    }
+
+    const updated = await service.updateBreedingPair(input)
+    const replay = await service.updateBreedingPair(input)
+
+    expect(updated.value).toMatchObject({
+      status: 'separated',
+      separatedOn: TODAY,
+      notes: 'Separated after litter',
+      activePairKey: undefined
+    })
+    expect(replay.replayed).toBe(true)
+    expect(await database.activityLogs.where('action').equals('breeding-pair.update').count()).toBe(1)
+  })
+
   it('enforces mutually exclusive experiment groups', async () => {
     const mouse = await createMouse('EXP-MOUSE')
     const experiment = (

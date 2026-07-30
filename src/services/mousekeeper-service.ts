@@ -95,6 +95,7 @@ import type {
   StatusChangeValue,
   TerminateMouseInput,
   UpdateCageInput,
+  UpdateBreedingPairInput,
   UpdateExperimentInput,
   UpdateMouseInput,
   UpdateMouseEventInput,
@@ -1405,6 +1406,93 @@ export class MouseKeeperService {
           warnings
         })
         return { value: pair, replayed: false, warnings }
+      }
+    )
+  }
+
+  async updateBreedingPair(
+    input: UpdateBreedingPairInput
+  ): Promise<CommandResult<BreedingPair>> {
+    const action = 'breeding-pair.update'
+    return this.database.transaction(
+      'rw',
+      [this.database.breedingPairs, this.database.activityLogs],
+      async () => {
+        const replay = await this.operationLog(input.operationId, action)
+        if (replay) {
+          const pair = await this.database.breedingPairs.get(
+            this.resultId(replay)
+          )
+          if (!pair) {
+            throw new ServiceError(
+              'integrity-error',
+              'Updated breeding pair referenced by activity log is missing'
+            )
+          }
+          return { value: pair, replayed: true, warnings: [] }
+        }
+
+        const current = await this.activeRecord(
+          this.database.breedingPairs,
+          input.breedingPairId,
+          'Breeding pair'
+        )
+        this.assertRevision(current, input.expectedRevision)
+        const status = input.patch.status ?? current.status
+        const activePairKey = CURRENT_BREEDING_STATUSES.has(status)
+          ? makeCompositeKey('pair', current.sireId, current.damId)
+          : undefined
+        if (activePairKey) {
+          const duplicate = await this.database.breedingPairs
+            .where('activePairKey')
+            .equals(activePairKey)
+            .filter(pair => pair.id !== current.id)
+            .first()
+          if (duplicate) {
+            throw new ServiceError(
+              'duplicate-breeding-pair',
+              'This breeding pair already has another current record'
+            )
+          }
+        }
+
+        const now = resolveNow(input)
+        const next: BreedingPair = breedingPairSchema.parse({
+          ...current,
+          revision: current.revision + 1,
+          updatedAt: now,
+          pairedOn: input.patch.pairedOn ?? current.pairedOn,
+          separatedOn:
+            input.patch.separatedOn === null
+              ? undefined
+              : (input.patch.separatedOn ?? current.separatedOn),
+          expectedDeliveryDate:
+            input.patch.expectedDeliveryDate === null
+              ? undefined
+              : (input.patch.expectedDeliveryDate ??
+                current.expectedDeliveryDate),
+          status,
+          activePairKey,
+          notes:
+            input.patch.notes === null
+              ? undefined
+              : (input.patch.notes ?? current.notes)
+        })
+        await this.database.breedingPairs.put(next)
+        const changedFields = Object.keys(input.patch)
+        await this.addActivity(input, now, {
+          action,
+          primaryEntityType: 'breedingPair',
+          primaryEntityId: next.id,
+          entityRefs: [
+            ['mouse', next.sireId],
+            ['mouse', next.damId]
+          ],
+          summary: `Updated breeding pair ${next.id}`,
+          changedFields,
+          resultEntityIds: [next.id]
+        })
+        return { value: next, replayed: false, warnings: [] }
       }
     )
   }

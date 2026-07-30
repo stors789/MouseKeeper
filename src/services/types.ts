@@ -177,6 +177,18 @@ export interface CreateBreedingPairInput extends CommandContext {
   notes?: string
 }
 
+export interface UpdateBreedingPairInput extends CommandContext {
+  breedingPairId: string
+  expectedRevision: number
+  patch: {
+    pairedOn?: LocalDate
+    separatedOn?: LocalDate | null
+    expectedDeliveryDate?: LocalDate | null
+    status?: BreedingPairStatus
+    notes?: string | null
+  }
+}
+
 export interface OffspringInput {
   id?: string
   earTag?: string
