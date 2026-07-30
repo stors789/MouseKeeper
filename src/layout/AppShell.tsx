@@ -1,5 +1,7 @@
 import { Search } from 'lucide-react'
 import {
+  lazy,
+  Suspense,
   useEffect,
   useState,
   type ReactNode
@@ -7,10 +9,13 @@ import {
 import { useLocation } from 'wouter'
 import { APP_CONFIG } from '../config/app'
 import { CreateMenu } from './CreateMenu'
-import { GlobalSearchDialog } from './GlobalSearchDialog'
 import { MobileNavigation } from './MobileNavigation'
 import { Sidebar } from './Sidebar'
 import { getPageTitle } from './navigation'
+
+const GlobalSearchDialog = lazy(async () => ({
+  default: (await import('./GlobalSearchDialog')).GlobalSearchDialog
+}))
 
 interface AppShellProps {
   children: ReactNode
@@ -99,10 +104,14 @@ export function AppShell({ children }: AppShellProps) {
         <CreateMenu mobileContext />
       </div>
       <MobileNavigation location={location} />
-      <GlobalSearchDialog
-        open={searchOpen}
-        onOpenChange={setSearchOpen}
-      />
+      {searchOpen ? (
+        <Suspense fallback={null}>
+          <GlobalSearchDialog
+            open={searchOpen}
+            onOpenChange={setSearchOpen}
+          />
+        </Suspense>
+      ) : null}
     </div>
   )
 }

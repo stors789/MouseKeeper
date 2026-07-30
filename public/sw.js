@@ -1,8 +1,55 @@
-const CACHE_NAME = 'mousekeeper-shell-v1'
-const APP_SHELL = ['/', '/index.html', '/favicon.svg', '/manifest.webmanifest']
+const CACHE_NAME = 'mousekeeper-shell-v2'
+const APP_SHELL = [
+  '/',
+  '/index.html',
+  '/asset-manifest.json',
+  '/favicon.svg',
+  '/manifest.webmanifest',
+  '/pwa-192x192.png',
+  '/pwa-512x512.png'
+]
+
+function offlineResponse() {
+  return new Response('MouseKeeper is offline and this resource is not cached.', {
+    status: 503,
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+  })
+}
+
+async function cacheAppShell() {
+  const cache = await caches.open(CACHE_NAME)
+  await cache.addAll(APP_SHELL)
+
+  const manifestResponse = await cache.match('/asset-manifest.json')
+  if (!manifestResponse) {
+    throw new Error('Unable to cache the production asset manifest')
+  }
+  const manifest = await manifestResponse.json()
+  if (!Array.isArray(manifest.assets)) {
+    throw new Error('Production asset manifest is invalid')
+  }
+  await cache.addAll(manifest.assets)
+
+  const indexResponse = await fetch('/index.html', { cache: 'no-store' })
+  if (!indexResponse.ok) {
+    throw new Error(`Unable to cache app shell: ${indexResponse.status}`)
+  }
+  const html = await indexResponse.clone().text()
+  await cache.put('/index.html', indexResponse)
+  const builtAssets = [
+    ...new Set(
+      [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map(
+        (match) => match[1]
+      )
+    )
+  ]
+  if (builtAssets.length > 0) {
+    await cache.addAll(builtAssets)
+  }
+}
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)))
+  event.waitUntil(cacheAppShell().then(() => self.skipWaiting()))
 })
 
 self.addEventListener('activate', (event) => {
@@ -31,7 +78,7 @@ self.addEventListener('fetch', (event) => {
           void caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', copy))
           return response
         })
-        .catch(() => caches.match('/index.html'))
+        .catch(async () => (await caches.match('/index.html')) ?? offlineResponse())
     )
     return
   }
@@ -46,7 +93,7 @@ self.addEventListener('fetch', (event) => {
           }
           return response
         })
-        .catch(() => cached)
+        .catch(() => cached ?? offlineResponse())
 
       return cached ?? network
     })

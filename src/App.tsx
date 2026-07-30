@@ -1,28 +1,96 @@
+import { lazy, Suspense } from 'react'
 import { Route, Switch } from 'wouter'
+import { Skeleton, SkeletonGroup } from './components/ui/Skeleton'
 import { ToastProvider } from './components/ui/Toast'
-import { BreedingDetailPage } from './features/breeding/BreedingDetailPage'
-import { BreedingFormPage } from './features/breeding/BreedingFormPage'
-import { BreedingPage } from './features/breeding/BreedingPage'
-import { CageDetailPage } from './features/cages/CageDetailPage'
-import { CageFormPage } from './features/cages/CageFormPage'
-import { CagesPage } from './features/cages/CagesPage'
-import { DashboardContainer } from './features/dashboard/DashboardContainer'
-import { DataPage } from './features/data/DataPage'
-import { ExperimentDetailPage } from './features/experiments/ExperimentDetailPage'
-import { ExperimentFormPage } from './features/experiments/ExperimentFormPage'
-import { ExperimentsPage } from './features/experiments/ExperimentsPage'
-import { MouseBulkCreatePage } from './features/mice/MouseBulkCreatePage'
-import { MouseDetailPage } from './features/mice/MouseDetailPage'
-import { MouseFormPage } from './features/mice/MouseFormPage'
-import { MicePage } from './features/mice/MicePage'
-import { QuickWeightPage } from './features/records/QuickWeightPage'
-import { RecordsPage } from './features/records/RecordsPage'
-import { SettingsPage } from './features/settings/SettingsPage'
-import { TaskFormPage } from './features/tasks/TaskFormPage'
-import { TasksPage } from './features/tasks/TasksPage'
 import { ThemeProvider } from './hooks/ThemeProvider'
 import { AppShell } from './layout/AppShell'
 import { NotFoundPage } from './layout/ModuleGuidePage'
+
+const DashboardContainer = lazy(async () => ({
+  default: (await import('./features/dashboard/DashboardContainer'))
+    .DashboardContainer
+}))
+const MicePage = lazy(async () => ({
+  default: (await import('./features/mice/MicePage')).MicePage
+}))
+const MouseFormPage = lazy(async () => ({
+  default: (await import('./features/mice/MouseFormPage')).MouseFormPage
+}))
+const MouseBulkCreatePage = lazy(async () => ({
+  default: (await import('./features/mice/MouseBulkCreatePage'))
+    .MouseBulkCreatePage
+}))
+const MouseDetailPage = lazy(async () => ({
+  default: (await import('./features/mice/MouseDetailPage')).MouseDetailPage
+}))
+const CagesPage = lazy(async () => ({
+  default: (await import('./features/cages/CagesPage')).CagesPage
+}))
+const CageFormPage = lazy(async () => ({
+  default: (await import('./features/cages/CageFormPage')).CageFormPage
+}))
+const CageDetailPage = lazy(async () => ({
+  default: (await import('./features/cages/CageDetailPage')).CageDetailPage
+}))
+const BreedingPage = lazy(async () => ({
+  default: (await import('./features/breeding/BreedingPage')).BreedingPage
+}))
+const BreedingFormPage = lazy(async () => ({
+  default: (await import('./features/breeding/BreedingFormPage'))
+    .BreedingFormPage
+}))
+const BreedingDetailPage = lazy(async () => ({
+  default: (await import('./features/breeding/BreedingDetailPage'))
+    .BreedingDetailPage
+}))
+const ExperimentsPage = lazy(async () => ({
+  default: (await import('./features/experiments/ExperimentsPage'))
+    .ExperimentsPage
+}))
+const ExperimentFormPage = lazy(async () => ({
+  default: (await import('./features/experiments/ExperimentFormPage'))
+    .ExperimentFormPage
+}))
+const ExperimentDetailPage = lazy(async () => ({
+  default: (await import('./features/experiments/ExperimentDetailPage'))
+    .ExperimentDetailPage
+}))
+const RecordsPage = lazy(async () => ({
+  default: (await import('./features/records/RecordsPage')).RecordsPage
+}))
+const QuickWeightPage = lazy(async () => ({
+  default: (await import('./features/records/QuickWeightPage')).QuickWeightPage
+}))
+const TasksPage = lazy(async () => ({
+  default: (await import('./features/tasks/TasksPage')).TasksPage
+}))
+const TaskFormPage = lazy(async () => ({
+  default: (await import('./features/tasks/TaskFormPage')).TaskFormPage
+}))
+const DataPage = lazy(async () => ({
+  default: (await import('./features/data/DataPage')).DataPage
+}))
+const SettingsPage = lazy(async () => ({
+  default: (await import('./features/settings/SettingsPage')).SettingsPage
+}))
+
+function RouteLoading() {
+  return (
+    <SkeletonGroup className="feature-page" label="正在加载工作区">
+      <div className="feature-page__header">
+        <div>
+          <Skeleton height={13} width={150} />
+          <Skeleton height={36} width={260} />
+        </div>
+      </div>
+      <div className="record-table-skeleton">
+        {Array.from({ length: 8 }, (_, index) => (
+          <Skeleton height={48} key={index} />
+        ))}
+      </div>
+    </SkeletonGroup>
+  )
+}
 
 function RoutedContent() {
   return (
@@ -127,7 +195,9 @@ export function App() {
     <ThemeProvider>
       <ToastProvider>
         <AppShell>
-          <RoutedContent />
+          <Suspense fallback={<RouteLoading />}>
+            <RoutedContent />
+          </Suspense>
         </AppShell>
       </ToastProvider>
     </ThemeProvider>

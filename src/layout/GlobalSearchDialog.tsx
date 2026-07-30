@@ -11,8 +11,8 @@ import { useDeferredValue, useState } from 'react'
 import { useLocation } from 'wouter'
 import { Dialog } from '../components/ui/Dialog'
 import { Input } from '../components/ui/Input'
-import { appDatabase } from '../app/runtime'
 import { searchGlobalRecords } from '../queries/search'
+import { db } from '../db'
 import {
   ALL_NAVIGATION_ITEMS,
   type NavigationItem
@@ -54,7 +54,7 @@ export function GlobalSearchDialog({
   const recordResults = useLiveQuery(
     () =>
       deferredQuery.trim()
-        ? searchGlobalRecords(appDatabase, deferredQuery, 6)
+        ? searchGlobalRecords(db, deferredQuery, 6)
         : Promise.resolve([]),
     [deferredQuery]
   )
