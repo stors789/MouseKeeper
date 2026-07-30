@@ -82,6 +82,7 @@ import type {
   MoveMouseInput,
   MoveMouseValue,
   RecordWeightInput,
+  RecordWeightsInput,
   RestoreCageInput,
   RestoreExperimentInput,
   RestoreMouseInput,
@@ -104,6 +105,7 @@ import type {
   UpdateMouseInput,
   UpdateMouseEventInput,
   UpdateTaskInput,
+  WeightBatchValue,
   WeightEntryValue
 } from './types'
 
@@ -2832,6 +2834,57 @@ export class MouseKeeperService {
           value: { weight, event },
           replayed: false,
           warnings
+        }
+      }
+    )
+  }
+
+  async recordWeights(
+    input: RecordWeightsInput
+  ): Promise<CommandResult<WeightBatchValue>> {
+    if (input.entries.length === 0) {
+      throw new ServiceError(
+        'invalid-state',
+        'At least one weight entry is required'
+      )
+    }
+    const mouseIds = input.entries.map(entry => entry.mouseId)
+    if (new Set(mouseIds).size !== mouseIds.length) {
+      throw new ServiceError(
+        'invalid-state',
+        'A quick-weight batch can contain each mouse only once'
+      )
+    }
+    return this.database.transaction(
+      'rw',
+      [
+        this.database.mice,
+        this.database.weightRecords,
+        this.database.mouseEvents,
+        this.database.appSettings,
+        this.database.activityLogs
+      ],
+      async () => {
+        const results: CommandResult<WeightEntryValue>[] = []
+        for (const [index, entry] of input.entries.entries()) {
+          results.push(
+            await this.recordWeight({
+              operationId: `${input.operationId}:${index}`,
+              now: input.now,
+              origin: input.origin,
+              sampleBatchId: input.sampleBatchId,
+              importBatchId: input.importBatchId,
+              warningAcknowledgements: input.warningAcknowledgements,
+              ...entry
+            })
+          )
+        }
+        return {
+          value: { entries: results.map(result => result.value) },
+          replayed: results.every(result => result.replayed),
+          warnings: [
+            ...new Set(results.flatMap(result => [...result.warnings]))
+          ]
         }
       }
     )

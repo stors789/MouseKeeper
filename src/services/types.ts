@@ -363,9 +363,25 @@ export interface RecordWeightInput extends CommandContext {
   notes?: string
 }
 
+export interface RecordWeightsInput extends CommandContext {
+  entries: ReadonlyArray<{
+    mouseId: string
+    measuredOn: LocalDate
+    measuredTime?: LocalTime
+    timeZone?: string
+    value: number
+    unit: WeightUnit
+    notes?: string
+  }>
+}
+
 export interface WeightEntryValue {
   weight: WeightRecord
   event: MouseEvent
+}
+
+export interface WeightBatchValue {
+  entries: WeightEntryValue[]
 }
 
 export interface CreateTaskInput extends CommandContext {

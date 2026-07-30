@@ -550,6 +550,60 @@ describe('MouseKeeperService', () => {
     ).toBe(1)
   })
 
+  it('records quick-weight batches atomically', async () => {
+    const firstMouse = await createMouse('BATCH-WEIGHT-1')
+    const secondMouse = await createMouse('BATCH-WEIGHT-2')
+    const input = {
+      operationId: operationId('weight-batch'),
+      now: NOW,
+      entries: [
+        {
+          mouseId: firstMouse.id,
+          measuredOn: TODAY,
+          value: 21.4,
+          unit: 'g' as const
+        },
+        {
+          mouseId: secondMouse.id,
+          measuredOn: TODAY,
+          value: 20.8,
+          unit: 'g' as const
+        }
+      ]
+    }
+    const created = await service.recordWeights(input)
+    const replay = await service.recordWeights(input)
+    expect(created.value.entries).toHaveLength(2)
+    expect(replay.replayed).toBe(true)
+    expect(await database.weightRecords.count()).toBe(2)
+    expect(await database.mouseEvents.count()).toBe(2)
+
+    const beforeWeights = await database.weightRecords.count()
+    const beforeEvents = await database.mouseEvents.count()
+    await expect(
+      service.recordWeights({
+        operationId: operationId('weight-batch-rollback'),
+        now: NOW,
+        entries: [
+          {
+            mouseId: firstMouse.id,
+            measuredOn: '2026-07-31',
+            value: 22,
+            unit: 'g'
+          },
+          {
+            mouseId: secondMouse.id,
+            measuredOn: '2026-07-31',
+            value: -1,
+            unit: 'g'
+          }
+        ]
+      })
+    ).rejects.toThrow()
+    expect(await database.weightRecords.count()).toBe(beforeWeights)
+    expect(await database.mouseEvents.count()).toBe(beforeEvents)
+  })
+
   it('frees active unique keys on soft delete and rejects conflicting restore', async () => {
     const first = await createMouse('RECYCLE')
     const deleted = (
