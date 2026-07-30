@@ -107,12 +107,19 @@ interface PendingCageAssignment {
   warnings: readonly string[]
 }
 
-export function MouseFormPage({ mouseId }: { mouseId?: string }) {
+export function MouseFormPage({
+  mouseId,
+  copyFromId
+}: {
+  mouseId?: string
+  copyFromId?: string
+}) {
   const [, navigate] = useLocation()
   const { showToast } = useToast()
   const [submitError, setSubmitError] = useState<string>()
   const [pendingCage, setPendingCage] = useState<PendingCageAssignment>()
   const options = useLiveQuery(async () => {
+    const sourceId = mouseId ?? copyFromId
     const [mice, cages, mouse] = await Promise.all([
       appDatabase.mice
         .filter((item) => item.deletedFlag === 0 && item.id !== mouseId)
@@ -125,10 +132,12 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
             cage.status !== 'inactive'
         )
         .toArray(),
-      mouseId ? appDatabase.mice.get(mouseId) : Promise.resolve(undefined)
+      sourceId
+        ? appDatabase.mice.get(sourceId)
+        : Promise.resolve(undefined)
     ])
     return { mice, cages, mouse }
-  }, [mouseId])
+  }, [copyFromId, mouseId])
   const {
     control,
     formState: { errors, isDirty, isSubmitting },
@@ -146,23 +155,25 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
     if (!options?.mouse) return
     const mouse = options.mouse
     reset({
-      earTag: mouse.earTag ?? '',
-      experimentNumber: mouse.experimentNumber ?? '',
+      earTag: copyFromId ? '' : (mouse.earTag ?? ''),
+      experimentNumber: copyFromId
+        ? ''
+        : (mouse.experimentNumber ?? ''),
       name: mouse.name ?? '',
       alias: mouse.alias ?? '',
       strain: mouse.strain,
       genotype: mouse.genotype ?? '',
       sex: mouse.sex,
       birthDate: mouse.birthDate ?? '',
-      status: mouse.status,
+      status: copyFromId ? 'alive' : mouse.status,
       source: mouse.source ?? '',
       coatColor: mouse.coatColor ?? '',
       sireId: mouse.sireId ?? '',
       damId: mouse.damId ?? '',
-      cageId: mouse.currentCageId ?? '',
+      cageId: copyFromId ? '' : (mouse.currentCageId ?? ''),
       notes: mouse.notes ?? ''
     })
-  }, [options?.mouse, reset])
+  }, [copyFromId, options?.mouse, reset])
 
   const onSubmit = handleSubmit(async (values) => {
     setSubmitError(undefined)
@@ -266,7 +277,7 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
     }
   }
 
-  if (mouseId && options === undefined) {
+  if ((mouseId || copyFromId) && options === undefined) {
     return (
       <div className="feature-page" aria-busy="true">
         <Alert title="正在加载小鼠档案">确认记录存在后才会开放编辑。</Alert>
@@ -274,7 +285,7 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
     )
   }
 
-  if (mouseId && options && !options.mouse) {
+  if ((mouseId || copyFromId) && options && !options.mouse) {
     return (
       <div className="feature-page">
         <Alert title="找不到小鼠档案" tone="critical">
@@ -290,7 +301,7 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
     )
   }
 
-  if (mouseId && options?.mouse?.deletedFlag === 1) {
+  if ((mouseId || copyFromId) && options?.mouse?.deletedFlag === 1) {
     return (
       <div className="feature-page">
         <Alert title="小鼠档案已在回收站" tone="warning">
@@ -311,16 +322,31 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
       <header className="feature-page__header">
         <div>
           <p className="feature-page__eyebrow">
-            群体管理 / 小鼠 / {mouseId ? '编辑' : '新建'}
+            群体管理 / 小鼠 /{' '}
+            {mouseId ? '编辑' : copyFromId ? '复制创建' : '新建'}
           </p>
-          <h2>{mouseId ? '编辑小鼠档案' : '新建小鼠'}</h2>
+          <h2>
+            {mouseId
+              ? '编辑小鼠档案'
+              : copyFromId
+                ? '复制相似小鼠'
+                : '新建小鼠'}
+          </h2>
           <p>
-            业务数据将在保存后写入此浏览器的 IndexedDB；至少填写一个可读编号。
+            {copyFromId
+              ? '已复制生物学和描述字段；编号、状态关系与当前笼位不会沿用。'
+              : '业务数据将在保存后写入此浏览器的 IndexedDB；至少填写一个可读编号。'}
           </p>
         </div>
         <Link
           className={buttonClassName({ variant: 'tertiary' })}
-          href={mouseId ? `/mice/${encodeURIComponent(mouseId)}` : '/mice'}
+          href={
+            mouseId
+              ? `/mice/${encodeURIComponent(mouseId)}`
+              : copyFromId
+                ? `/mice/${encodeURIComponent(copyFromId)}`
+                : '/mice'
+          }
         >
           <ArrowLeft aria-hidden="true" size={17} />
           返回

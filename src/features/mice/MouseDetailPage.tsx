@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Boxes,
   CalendarClock,
+  CopyPlus,
   Dna,
   FilePenLine,
   FlaskConical,
@@ -506,6 +507,13 @@ export function MouseDetailPage({ mouseId }: { mouseId: string }) {
           >
             <FilePenLine aria-hidden="true" size={17} />
             编辑档案
+          </Link>
+          <Link
+            className={buttonClassName({ variant: 'secondary' })}
+            href={`/mice/${encodeURIComponent(mouseId)}/copy`}
+          >
+            <CopyPlus aria-hidden="true" size={17} />
+            复制创建
           </Link>
         </div>
       </header>

@@ -108,6 +108,9 @@ function RoutedContent() {
       <Route path="/mice/bulk-create">
         <MouseBulkCreatePage />
       </Route>
+      <Route path="/mice/:mouseId/copy">
+        {(params) => <MouseFormPage copyFromId={params.mouseId} />}
+      </Route>
       <Route path="/mice/:mouseId/edit">
         {(params) => <MouseFormPage mouseId={params.mouseId} />}
       </Route>
