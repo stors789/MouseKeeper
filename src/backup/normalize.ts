@@ -29,7 +29,9 @@ export function prepareRestoredData(data: BackupData): BackupData {
       const normalizedExperimentNumber = normalizeOptionalText(
         mouse.experimentNumber
       )
-      const normalizedAlias = normalizeOptionalText(mouse.alias)
+      const normalizedAlias = normalizeOptionalText(
+        mouse.alias ?? mouse.name
+      )
       const genotypeKey = normalizeOptionalText(mouse.genotype)
       return {
         ...mouse,

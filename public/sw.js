@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mousekeeper-shell-v2'
+const CACHE_NAME = 'mousekeeper-shell-v3'
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -84,18 +84,22 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const network = fetch(event.request)
-        .then((response) => {
-          if (response.ok && response.type === 'basic') {
-            const copy = response.clone()
-            void caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy))
-          }
-          return response
-        })
-        .catch(() => cached ?? offlineResponse())
+    caches
+      .match(event.request, { ignoreVary: true })
+      .then((cached) => {
+        const network = fetch(event.request)
+          .then((response) => {
+            if (response.ok && response.type === 'basic') {
+              const copy = response.clone()
+              void caches
+                .open(CACHE_NAME)
+                .then((cache) => cache.put(event.request, copy))
+            }
+            return response
+          })
+          .catch(() => cached ?? offlineResponse())
 
-      return cached ?? network
-    })
+        return cached ?? network
+      })
   )
 })

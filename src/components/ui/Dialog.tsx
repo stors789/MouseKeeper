@@ -1,7 +1,7 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { clsx } from 'clsx'
 import { X } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 
 export type DialogSize = 'small' | 'medium' | 'large' | 'drawer'
 
@@ -30,6 +30,8 @@ export function Dialog({
   title,
   trigger
 }: DialogProps) {
+  const descriptionId = useId()
+
   return (
     <DialogPrimitive.Root
       defaultOpen={defaultOpen}
@@ -42,6 +44,9 @@ export function Dialog({
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="ui-dialog__overlay" />
         <DialogPrimitive.Content
+          aria-describedby={descriptionId}
+          aria-label={title}
+          aria-labelledby={undefined}
           className={clsx(
             'ui-dialog__content',
             `ui-dialog__content--${size}`,
@@ -53,7 +58,10 @@ export function Dialog({
               <DialogPrimitive.Title className="ui-dialog__title">
                 {title}
               </DialogPrimitive.Title>
-              <DialogPrimitive.Description className="ui-dialog__description">
+              <DialogPrimitive.Description
+                className="ui-dialog__description"
+                id={descriptionId}
+              >
                 {description}
               </DialogPrimitive.Description>
             </div>

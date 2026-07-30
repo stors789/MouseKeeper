@@ -130,6 +130,23 @@ describe('versioned database backup', () => {
     expect(serializeBackup(cloneBackup(backup))).toBe(serializeBackup(backup))
   })
 
+  it('accepts a name-backed normalized alias in a signed backup', async () => {
+    const database = createDatabase('named-mouse')
+    await database.mice.add({
+      ...mouse('named-mouse', 'NAMED-1'),
+      name: 'Atlas',
+      normalizedAlias: 'atlas',
+      searchTerms: ['named-1', 'atlas', 'c57bl/6j']
+    })
+
+    const backup = await exportDatabaseBackup(database)
+
+    expect(backup.data.mice[0]).toMatchObject({
+      name: 'Atlas',
+      normalizedAlias: 'atlas'
+    })
+  })
+
   it('replaces an existing database with a validated non-empty backup', async () => {
     const source = createDatabase('replace-source')
     const target = createDatabase('replace-target')
