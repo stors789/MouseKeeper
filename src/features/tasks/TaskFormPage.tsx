@@ -100,7 +100,10 @@ export function TaskFormPage({ taskId }: { taskId?: string }) {
   const onSubmit = handleSubmit(async (values) => {
     setSubmitError(undefined)
     try {
-      if (taskId && options?.task) {
+      if (taskId) {
+        if (!options?.task) {
+          throw new Error('找不到要编辑的任务，未执行任何写入。')
+        }
         await appService.updateTask({
           operationId: crypto.randomUUID(),
           taskId,
@@ -136,6 +139,46 @@ export function TaskFormPage({ taskId }: { taskId?: string }) {
       setSubmitError(readableError(error))
     }
   })
+
+  if (taskId && options === undefined) {
+    return (
+      <div className="feature-page" aria-busy="true">
+        <Alert title="正在加载任务">确认记录存在后才会开放编辑。</Alert>
+      </div>
+    )
+  }
+
+  if (taskId && !options?.task) {
+    return (
+      <div className="feature-page">
+        <Alert title="找不到任务" tone="critical">
+          记录可能已被永久删除，或当前链接无效。
+        </Alert>
+        <Link
+          className={buttonClassName({ variant: 'secondary' })}
+          href="/tasks"
+        >
+          返回任务列表
+        </Link>
+      </div>
+    )
+  }
+
+  if (taskId && options?.task?.deletedFlag === 1) {
+    return (
+      <div className="feature-page">
+        <Alert title="任务已在回收站" tone="warning">
+          请先在“数据与安全”页面恢复后再编辑。
+        </Alert>
+        <Link
+          className={buttonClassName({ variant: 'secondary' })}
+          href="/tasks"
+        >
+          返回任务列表
+        </Link>
+      </div>
+    )
+  }
 
   return (
     <div className="feature-page feature-form-page">

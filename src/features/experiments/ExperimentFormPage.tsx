@@ -93,13 +93,15 @@ export function ExperimentFormPage({
   const [, navigate] = useLocation()
   const { showToast } = useToast()
   const [submitError, setSubmitError] = useState<string>()
-  const experiment = useLiveQuery(
-    () =>
-      experimentId
-        ? appDatabase.experiments.get(experimentId)
-        : undefined,
+  const experimentQuery = useLiveQuery(
+    async () => ({
+      experiment: experimentId
+        ? await appDatabase.experiments.get(experimentId)
+        : undefined
+    }),
     [experimentId]
   )
+  const experiment = experimentQuery?.experiment
   const {
     control,
     formState: { errors, isDirty, isSubmitting },
@@ -135,7 +137,10 @@ export function ExperimentFormPage({
   const onSubmit = handleSubmit(async (values) => {
     setSubmitError(undefined)
     try {
-      if (experimentId && experiment) {
+      if (experimentId) {
+        if (!experiment) {
+          throw new Error('找不到要编辑的实验，未执行任何写入。')
+        }
         const result = await appService.updateExperiment({
           operationId: crypto.randomUUID(),
           experimentId,
@@ -202,6 +207,46 @@ export function ExperimentFormPage({
       setSubmitError(readableError(error))
     }
   })
+
+  if (experimentId && experimentQuery === undefined) {
+    return (
+      <div className="feature-page" aria-busy="true">
+        <Alert title="正在加载实验">确认记录存在后才会开放编辑。</Alert>
+      </div>
+    )
+  }
+
+  if (experimentId && !experiment) {
+    return (
+      <div className="feature-page">
+        <Alert title="找不到实验" tone="critical">
+          记录可能已被永久删除，或当前链接无效。
+        </Alert>
+        <Link
+          className={buttonClassName({ variant: 'secondary' })}
+          href="/experiments"
+        >
+          返回实验列表
+        </Link>
+      </div>
+    )
+  }
+
+  if (experimentId && experiment?.deletedFlag === 1) {
+    return (
+      <div className="feature-page">
+        <Alert title="实验已在回收站" tone="warning">
+          请先在“数据与安全”页面恢复后再编辑。
+        </Alert>
+        <Link
+          className={buttonClassName({ variant: 'secondary' })}
+          href="/experiments"
+        >
+          返回实验列表
+        </Link>
+      </div>
+    )
+  }
 
   return (
     <div className="feature-page feature-form-page">

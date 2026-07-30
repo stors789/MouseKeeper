@@ -167,7 +167,10 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
   const onSubmit = handleSubmit(async (values) => {
     setSubmitError(undefined)
     try {
-      if (mouseId && options?.mouse) {
+      if (mouseId) {
+        if (!options?.mouse) {
+          throw new Error('找不到要编辑的小鼠，未执行任何写入。')
+        }
         const result = await appService.updateMouse({
           operationId: crypto.randomUUID(),
           mouseId,
@@ -263,11 +266,35 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
     }
   }
 
+  if (mouseId && options === undefined) {
+    return (
+      <div className="feature-page" aria-busy="true">
+        <Alert title="正在加载小鼠档案">确认记录存在后才会开放编辑。</Alert>
+      </div>
+    )
+  }
+
   if (mouseId && options && !options.mouse) {
     return (
       <div className="feature-page">
         <Alert title="找不到小鼠档案" tone="critical">
           记录可能已被永久删除或当前链接无效。
+        </Alert>
+        <Link
+          className={buttonClassName({ variant: 'secondary' })}
+          href="/mice"
+        >
+          返回小鼠列表
+        </Link>
+      </div>
+    )
+  }
+
+  if (mouseId && options?.mouse?.deletedFlag === 1) {
+    return (
+      <div className="feature-page">
+        <Alert title="小鼠档案已在回收站" tone="warning">
+          请先在“数据与安全”页面恢复后再编辑。
         </Alert>
         <Link
           className={buttonClassName({ variant: 'secondary' })}

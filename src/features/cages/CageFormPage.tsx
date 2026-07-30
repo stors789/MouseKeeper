@@ -55,10 +55,13 @@ export function CageFormPage({ cageId }: { cageId?: string }) {
   const [, navigate] = useLocation()
   const { showToast } = useToast()
   const [submitError, setSubmitError] = useState<string>()
-  const cage = useLiveQuery(
-    () => (cageId ? appDatabase.cages.get(cageId) : undefined),
+  const cageQuery = useLiveQuery(
+    async () => ({
+      cage: cageId ? await appDatabase.cages.get(cageId) : undefined
+    }),
     [cageId]
   )
+  const cage = cageQuery?.cage
   const {
     control,
     formState: { errors, isDirty, isSubmitting },
@@ -88,7 +91,10 @@ export function CageFormPage({ cageId }: { cageId?: string }) {
   const onSubmit = handleSubmit(async (values) => {
     setSubmitError(undefined)
     try {
-      if (cageId && cage) {
+      if (cageId) {
+        if (!cage) {
+          throw new Error('找不到要编辑的笼位，未执行任何写入。')
+        }
         const result = await appService.updateCage({
           operationId: crypto.randomUUID(),
           cageId,
@@ -134,6 +140,30 @@ export function CageFormPage({ cageId }: { cageId?: string }) {
       setSubmitError(readableError(error))
     }
   })
+
+  if (cageId && cageQuery === undefined) {
+    return (
+      <div className="feature-page" aria-busy="true">
+        <Alert title="正在加载笼位">确认记录存在后才会开放编辑。</Alert>
+      </div>
+    )
+  }
+
+  if (cageId && !cage) {
+    return (
+      <div className="feature-page">
+        <Alert title="找不到笼位" tone="critical">
+          记录可能已被永久删除，或当前链接无效。
+        </Alert>
+        <Link
+          className={buttonClassName({ variant: 'secondary' })}
+          href="/cages"
+        >
+          返回笼位列表
+        </Link>
+      </div>
+    )
+  }
 
   if (cageId && cage && cage.deletedFlag === 1) {
     return (
