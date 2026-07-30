@@ -4,7 +4,9 @@ import type {
   CageAssignment,
   CageStatus,
   DataOrigin,
+  Experiment,
   ExperimentAssignment,
+  ExperimentGroup,
   ExperimentGroupType,
   ExperimentStatus,
   IsoInstant,
@@ -234,6 +236,24 @@ export interface CreateExperimentInput extends CommandContext {
   notes?: string
 }
 
+export interface CreateExperimentWithInitialGroupInput
+  extends CreateExperimentInput {
+  initialGroup: {
+    name: string
+    groupType: ExperimentGroupType
+    exclusionSet?: string
+    intervention?: string
+    dose?: string
+    frequency?: string
+    notes?: string
+  }
+}
+
+export interface ExperimentCreationValue {
+  experiment: Experiment
+  initialGroup: ExperimentGroup
+}
+
 export interface UpdateExperimentInput extends CommandContext {
   experimentId: string
   expectedRevision: number
@@ -273,9 +293,21 @@ export interface AssignMouseToExperimentInput extends CommandContext {
   joinedTime?: LocalTime
 }
 
+export interface AssignMiceToExperimentInput extends CommandContext {
+  mouseIds: readonly string[]
+  experimentId: string
+  groupId: string
+  joinedOn: LocalDate
+  joinedTime?: LocalTime
+}
+
 export interface ExperimentAssignmentValue {
   assignment: ExperimentAssignment
   event: MouseEvent
+}
+
+export interface ExperimentBatchAssignmentValue {
+  entries: ExperimentAssignmentValue[]
 }
 
 export interface ExitExperimentAssignmentInput extends CommandContext {

@@ -251,6 +251,33 @@ export const breedingPairSchema = baseShape
         message: 'Separated date cannot precede paired date'
       })
     }
+    if (
+      pair.expectedDeliveryDate &&
+      pair.expectedDeliveryDate < pair.pairedOn
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['expectedDeliveryDate'],
+        message: 'Expected delivery date cannot precede paired date'
+      })
+    }
+    if (
+      (pair.status === 'planned' || pair.status === 'active') &&
+      pair.separatedOn
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['separatedOn'],
+        message: 'A current breeding pair cannot have a separated date'
+      })
+    }
+    if (pair.status === 'separated' && !pair.separatedOn) {
+      context.addIssue({
+        code: 'custom',
+        path: ['separatedOn'],
+        message: 'A separated breeding pair requires a separated date'
+      })
+    }
   })
 
 export const litterSchema = baseShape

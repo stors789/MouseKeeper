@@ -267,6 +267,92 @@ describe('MouseKeeperService', () => {
     expect(await database.activityLogs.where('action').equals('breeding-pair.update').count()).toBe(1)
   })
 
+  it('enforces breeding date, count, transition, and revision invariants', async () => {
+    const sire = await createMouse('RULE-SIRE', {
+      sex: 'male',
+      birthDate: '2025-01-01'
+    })
+    const dam = await createMouse('RULE-DAM', {
+      sex: 'female',
+      birthDate: '2025-01-01'
+    })
+    await expect(
+      service.createBreedingPair({
+        operationId: operationId('bad-delivery'),
+        now: NOW,
+        sireId: sire.id,
+        damId: dam.id,
+        pairedOn: '2026-07-10',
+        expectedDeliveryDate: '2026-07-09'
+      })
+    ).rejects.toThrow('Expected delivery date')
+
+    const pair = (
+      await service.createBreedingPair({
+        operationId: operationId('rule-pair'),
+        now: NOW,
+        sireId: sire.id,
+        damId: dam.id,
+        pairedOn: '2026-07-10'
+      })
+    ).value
+
+    await expect(
+      service.createLitterWithOffspring({
+        operationId: operationId('bad-litter-date'),
+        now: NOW,
+        breedingPairId: pair.id,
+        litterNumber: 'EARLY',
+        bornOn: '2026-07-09',
+        offspring: []
+      })
+    ).rejects.toMatchObject({ code: 'invalid-state' })
+
+    await expect(
+      service.createLitterWithOffspring({
+        operationId: operationId('bad-litter-count'),
+        now: NOW,
+        breedingPairId: pair.id,
+        litterNumber: 'COUNT',
+        bornOn: '2026-07-20',
+        bornCount: 1,
+        aliveCount: 0,
+        offspring: [{ earTag: 'IMPOSSIBLE-PUP', sex: 'female' }]
+      })
+    ).rejects.toMatchObject({ code: 'invalid-state' })
+
+    const separated = (
+      await service.updateBreedingPair({
+        operationId: operationId('rule-separate'),
+        now: NOW,
+        breedingPairId: pair.id,
+        expectedRevision: pair.revision,
+        patch: {
+          status: 'separated',
+          separatedOn: TODAY
+        }
+      })
+    ).value
+    await expect(
+      service.updateBreedingPair({
+        operationId: operationId('rule-reopen'),
+        now: NOW,
+        breedingPairId: pair.id,
+        expectedRevision: separated.revision,
+        patch: { status: 'active' }
+      })
+    ).rejects.toMatchObject({ code: 'invalid-state' })
+    await expect(
+      service.updateBreedingPair({
+        operationId: operationId('rule-stale'),
+        now: NOW,
+        breedingPairId: pair.id,
+        expectedRevision: pair.revision,
+        patch: { notes: 'stale write' }
+      })
+    ).rejects.toMatchObject({ code: 'revision-conflict' })
+  })
+
   it('enforces mutually exclusive experiment groups', async () => {
     const mouse = await createMouse('EXP-MOUSE')
     const experiment = (
@@ -317,6 +403,43 @@ describe('MouseKeeperService', () => {
     ).rejects.toMatchObject({
       code: 'exclusive-group-conflict'
     })
+  })
+
+  it('creates an experiment and initial group atomically', async () => {
+    const input = {
+      operationId: operationId('experiment-with-group'),
+      now: NOW,
+      name: 'Atomic study',
+      status: 'planned' as const,
+      initialGroup: {
+        name: 'Control',
+        groupType: 'control' as const,
+        exclusionSet: 'study-arm'
+      }
+    }
+    const created = await service.createExperimentWithInitialGroup(input)
+    const replay = await service.createExperimentWithInitialGroup(input)
+
+    expect(created.value.initialGroup.experimentId).toBe(
+      created.value.experiment.id
+    )
+    expect(replay.replayed).toBe(true)
+    expect(await database.experiments.count()).toBe(1)
+    expect(await database.experimentGroups.count()).toBe(1)
+
+    await expect(
+      service.createExperimentWithInitialGroup({
+        ...input,
+        operationId: operationId('experiment-rollback'),
+        name: 'Must roll back',
+        initialGroup: { name: '', groupType: 'custom' }
+      })
+    ).rejects.toThrow()
+    expect(
+      await database.experiments
+        .filter((experiment) => experiment.name === 'Must roll back')
+        .count()
+    ).toBe(0)
   })
 
   it('atomically closes active relationships on terminal status', async () => {

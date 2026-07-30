@@ -56,6 +56,7 @@ import { ServiceError, WarningRequiredError } from './errors'
 import { WARNING_CODES } from './types'
 import type {
   AssignMouseToExperimentInput,
+  AssignMiceToExperimentInput,
   ChangeMouseStatusInput,
   CommandContext,
   CommandResult,
@@ -63,6 +64,7 @@ import type {
   CreateCageInput,
   CreateExperimentGroupInput,
   CreateExperimentInput,
+  CreateExperimentWithInitialGroupInput,
   CreateLitterInput,
   CreateMouseEventInput,
   CreateMouseInput,
@@ -71,6 +73,8 @@ import type {
   DeleteSampleBatchInput,
   DeleteSampleBatchResult,
   ExperimentAssignmentValue,
+  ExperimentBatchAssignmentValue,
+  ExperimentCreationValue,
   ExitExperimentAssignmentInput,
   LeaveCageInput,
   LeaveCageValue,
@@ -105,6 +109,13 @@ import type {
 
 const TERMINAL_MOUSE_STATUSES = new Set(['dead', 'euthanized', 'transferred'])
 const CURRENT_BREEDING_STATUSES = new Set(['planned', 'active'])
+const BREEDING_STATUS_TRANSITIONS = new Map([
+  ['planned', new Set(['active', 'cancelled'])],
+  ['active', new Set(['separated', 'completed', 'cancelled'])],
+  ['separated', new Set(['completed'])],
+  ['completed', new Set<string>()],
+  ['cancelled', new Set<string>()]
+])
 const DEFAULT_TIME_ZONE = 'UTC'
 
 interface ActivityInput {
@@ -1439,6 +1450,15 @@ export class MouseKeeperService {
         )
         this.assertRevision(current, input.expectedRevision)
         const status = input.patch.status ?? current.status
+        if (
+          status !== current.status &&
+          !BREEDING_STATUS_TRANSITIONS.get(current.status)?.has(status)
+        ) {
+          throw new ServiceError(
+            'invalid-state',
+            `Cannot change breeding pair from ${current.status} to ${status}`
+          )
+        }
         const activePairKey = CURRENT_BREEDING_STATUSES.has(status)
           ? makeCompositeKey('pair', current.sireId, current.damId)
           : undefined
@@ -1462,8 +1482,9 @@ export class MouseKeeperService {
           revision: current.revision + 1,
           updatedAt: now,
           pairedOn: input.patch.pairedOn ?? current.pairedOn,
-          separatedOn:
-            input.patch.separatedOn === null
+          separatedOn: CURRENT_BREEDING_STATUSES.has(status)
+            ? undefined
+            : input.patch.separatedOn === null
               ? undefined
               : (input.patch.separatedOn ?? current.separatedOn),
           expectedDeliveryDate:
@@ -1478,8 +1499,24 @@ export class MouseKeeperService {
               ? undefined
               : (input.patch.notes ?? current.notes)
         })
+        const changedFields = [
+          'pairedOn',
+          'separatedOn',
+          'expectedDeliveryDate',
+          'status',
+          'notes'
+        ].filter(
+          field =>
+            current[field as keyof BreedingPair] !==
+            next[field as keyof BreedingPair]
+        )
+        if (changedFields.length === 0) {
+          throw new ServiceError(
+            'invalid-state',
+            'Breeding pair update does not change any fields'
+          )
+        }
         await this.database.breedingPairs.put(next)
-        const changedFields = Object.keys(input.patch)
         await this.addActivity(input, now, {
           action,
           primaryEntityType: 'breedingPair',
@@ -1540,6 +1577,20 @@ export class MouseKeeperService {
           throw new ServiceError(
             'invalid-state',
             `Cannot add a litter to breeding pair in ${pair.status} status`
+          )
+        }
+        if (compareLocalDates(input.bornOn, pair.pairedOn) < 0) {
+          throw new ServiceError(
+            'invalid-state',
+            'Litter birth date cannot precede the pair date'
+          )
+        }
+        const requestedBornCount = input.bornCount ?? input.offspring.length
+        const requestedAliveCount = input.aliveCount ?? input.offspring.length
+        if (input.offspring.length > requestedAliveCount) {
+          throw new ServiceError(
+            'invalid-state',
+            'Created offspring cannot exceed the litter alive count'
           )
         }
         const sire = await this.activeRecord(
@@ -1668,8 +1719,8 @@ export class MouseKeeperService {
             ])
           })
         })
-        const bornCount = input.bornCount ?? offspring.length
-        const aliveCount = input.aliveCount ?? offspring.length
+        const bornCount = requestedBornCount
+        const aliveCount = requestedAliveCount
         const litter: Litter = litterSchema.parse({
           ...baseFields(input, litterId, now),
           breedingPairId: pair.id,
@@ -1808,6 +1859,40 @@ export class MouseKeeperService {
           resultEntityIds: [experiment.id]
         })
         return { value: experiment, replayed: false, warnings: [] }
+      }
+    )
+  }
+
+  async createExperimentWithInitialGroup(
+    input: CreateExperimentWithInitialGroupInput
+  ): Promise<CommandResult<ExperimentCreationValue>> {
+    return this.database.transaction(
+      'rw',
+      [
+        this.database.experiments,
+        this.database.experimentGroups,
+        this.database.activityLogs
+      ],
+      async () => {
+        const { initialGroup, ...experimentInput } = input
+        const experimentResult = await this.createExperiment({
+          ...experimentInput,
+          operationId: `${input.operationId}:experiment`
+        })
+        const groupResult = await this.createExperimentGroup({
+          ...experimentInput,
+          ...initialGroup,
+          operationId: `${input.operationId}:group`,
+          experimentId: experimentResult.value.id
+        })
+        return {
+          value: {
+            experiment: experimentResult.value,
+            initialGroup: groupResult.value
+          },
+          replayed: experimentResult.replayed && groupResult.replayed,
+          warnings: []
+        }
       }
     )
   }
@@ -2162,6 +2247,62 @@ export class MouseKeeperService {
           value: { assignment, event },
           replayed: false,
           warnings
+        }
+      }
+    )
+  }
+
+  async assignMiceToExperiment(
+    input: AssignMiceToExperimentInput
+  ): Promise<CommandResult<ExperimentBatchAssignmentValue>> {
+    const mouseIds = [...new Set(input.mouseIds)]
+    if (mouseIds.length === 0) {
+      throw new ServiceError(
+        'invalid-state',
+        'At least one mouse must be selected'
+      )
+    }
+    if (mouseIds.length !== input.mouseIds.length) {
+      throw new ServiceError(
+        'invalid-state',
+        'The batch contains duplicate mouse IDs'
+      )
+    }
+    return this.database.transaction(
+      'rw',
+      [
+        this.database.mice,
+        this.database.experiments,
+        this.database.experimentGroups,
+        this.database.experimentAssignments,
+        this.database.mouseEvents,
+        this.database.activityLogs
+      ],
+      async () => {
+        const results: CommandResult<ExperimentAssignmentValue>[] = []
+        for (const [index, mouseId] of mouseIds.entries()) {
+          results.push(
+            await this.assignMouseToExperiment({
+              operationId: `${input.operationId}:${index}`,
+              now: input.now,
+              origin: input.origin,
+              sampleBatchId: input.sampleBatchId,
+              importBatchId: input.importBatchId,
+              warningAcknowledgements: input.warningAcknowledgements,
+              mouseId,
+              experimentId: input.experimentId,
+              groupId: input.groupId,
+              joinedOn: input.joinedOn,
+              joinedTime: input.joinedTime
+            })
+          )
+        }
+        return {
+          value: { entries: results.map(result => result.value) },
+          replayed: results.every(result => result.replayed),
+          warnings: [
+            ...new Set(results.flatMap(result => [...result.warnings]))
+          ]
         }
       }
     )
