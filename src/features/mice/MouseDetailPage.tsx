@@ -27,12 +27,12 @@ import { Select } from '../../components/ui/Select'
 import { StatusChip } from '../../components/ui/StatusChip'
 import { Textarea } from '../../components/ui/Textarea'
 import {
-  MOUSE_EVENT_TYPES,
+  MANUAL_MOUSE_EVENT_TYPES,
   MOUSE_STATUSES,
   WEIGHT_UNITS,
   mouseDisplayLabel,
   todayLocalDate,
-  type MouseEventType,
+  type ManualMouseEventType,
   type MouseStatus,
   type WeightUnit
 } from '../../domain'
@@ -49,9 +49,7 @@ import {
 import { WarningRequiredError } from '../../services'
 import { MouseStatusChip } from './MouseStatusChip'
 
-const EVENT_OPTIONS = MOUSE_EVENT_TYPES.filter(
-  (type): type is Exclude<MouseEventType, 'weight'> => type !== 'weight'
-)
+const EVENT_OPTIONS = MANUAL_MOUSE_EVENT_TYPES
 
 function optional(value: string): string | undefined {
   const trimmed = value.trim()
@@ -315,10 +313,10 @@ export function MouseDetailPage({ mouseId }: { mouseId: string }) {
   const submitEvent = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const values = new FormData(event.currentTarget)
-    const eventType = formString(values, 'eventType') as Exclude<
-      MouseEventType,
-      'weight'
-    >
+    const eventType = formString(
+      values,
+      'eventType'
+    ) as ManualMouseEventType
     void runAction('event', async () => {
       await appService.createMouseEvent({
         operationId: crypto.randomUUID(),

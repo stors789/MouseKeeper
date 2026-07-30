@@ -2,8 +2,10 @@ import {
   assertLocalDate,
   calculateAge,
   calculateAgeWeeks,
+  instantToLocalDateTime,
   isValidLocalDate,
-  isValidLocalTime
+  isValidLocalTime,
+  localDateTimeToInstant
 } from './dates'
 
 describe('local date helpers', () => {
@@ -33,5 +35,27 @@ describe('local date helpers', () => {
       'birthDate cannot be after asOfDate'
     )
   })
-})
 
+  it('converts wall-clock values with their declared IANA time zone', () => {
+    expect(
+      localDateTimeToInstant(
+        '2026-07-31',
+        '09:00',
+        'Asia/Shanghai'
+      )
+    ).toBe('2026-07-31T01:00:00.000Z')
+    expect(
+      instantToLocalDateTime(
+        '2026-07-31T01:00:00.000Z',
+        'Asia/Shanghai'
+      )
+    ).toEqual({ date: '2026-07-31', time: '09:00' })
+    expect(() =>
+      localDateTimeToInstant(
+        '2026-03-08',
+        '02:30',
+        'America/New_York'
+      )
+    ).toThrow('do not exist')
+  })
+})

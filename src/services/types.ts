@@ -14,9 +14,9 @@ import type {
   Litter,
   LocalDate,
   LocalTime,
+  ManualMouseEventType,
   Mouse,
   MouseEvent,
-  MouseEventType,
   MouseSex,
   MouseStatus,
   Tag,
@@ -381,7 +381,7 @@ export interface ExitExperimentAssignmentInput extends CommandContext {
 export interface CreateMouseEventInput extends CommandContext {
   id?: string
   mouseId: string
-  eventType: Exclude<MouseEventType, 'weight'>
+  eventType: ManualMouseEventType
   occurredOn: LocalDate
   occurredTime?: LocalTime
   timeZone?: string

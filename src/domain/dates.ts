@@ -103,20 +103,111 @@ export function todayLocalDate(now = new Date()): LocalDate {
   return `${year}-${month}-${day}`
 }
 
+export function localTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+}
+
+interface ZonedDateTimeParts {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+}
+
+function zonedDateTimeParts(
+  instant: number,
+  timeZone: string
+): ZonedDateTimeParts {
+  let formatter: Intl.DateTimeFormat
+  try {
+    formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      calendar: 'gregory',
+      numberingSystem: 'latn',
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  } catch {
+    throw new RangeError(`timeZone must be a valid IANA time zone: ${timeZone}`)
+  }
+  const values = new Map(
+    formatter
+      .formatToParts(new Date(instant))
+      .map(part => [part.type, Number(part.value)])
+  )
+  const year = values.get('year')
+  const month = values.get('month')
+  const day = values.get('day')
+  const hour = values.get('hour')
+  const minute = values.get('minute')
+  if (
+    year === undefined ||
+    month === undefined ||
+    day === undefined ||
+    hour === undefined ||
+    minute === undefined
+  ) {
+    throw new RangeError('time zone date parts could not be resolved')
+  }
+  return { year, month, day, hour, minute }
+}
+
 export function localDateTimeToInstant(
   date: LocalDate,
-  time: LocalTime = '00:00'
+  time: LocalTime = '00:00',
+  timeZone: string = localTimeZone()
 ): IsoInstant {
   assertLocalDate(date)
   assertLocalTime(time)
-  const instant = new Date(`${date}T${time}:00`)
-  if (Number.isNaN(instant.valueOf())) {
-    throw new RangeError('date and time could not be converted to an instant')
+  const [year, month, day] = parseLocalDateParts(date) as [
+    number,
+    number,
+    number
+  ]
+  const [hour, minute] = time.split(':').map(Number) as [number, number]
+  const wallClockUtc = Date.UTC(year, month - 1, day, hour, minute)
+  let candidate = wallClockUtc
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const projected = zonedDateTimeParts(candidate, timeZone)
+    const projectedUtc = Date.UTC(
+      projected.year,
+      projected.month - 1,
+      projected.day,
+      projected.hour,
+      projected.minute
+    )
+    const next = wallClockUtc - (projectedUtc - candidate)
+    if (next === candidate) {
+      break
+    }
+    candidate = next
   }
-  return instant.toISOString()
+
+  const projected = zonedDateTimeParts(candidate, timeZone)
+  if (
+    projected.year !== year ||
+    projected.month !== month ||
+    projected.day !== day ||
+    projected.hour !== hour ||
+    projected.minute !== minute
+  ) {
+    throw new RangeError(
+      `date and time do not exist in time zone ${timeZone}`
+    )
+  }
+  return new Date(candidate).toISOString()
 }
 
-export function instantToLocalDateTime(instant: IsoInstant): {
+export function instantToLocalDateTime(
+  instant: IsoInstant,
+  timeZone: string = localTimeZone()
+): {
   date: LocalDate
   time: LocalTime
 } {
@@ -124,14 +215,14 @@ export function instantToLocalDateTime(instant: IsoInstant): {
   if (Number.isNaN(date.valueOf())) {
     throw new RangeError('instant must be a valid ISO date-time')
   }
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  const hours = String(date.getHours()).padStart(2, '0')
-  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const parts = zonedDateTimeParts(date.valueOf(), timeZone)
   return {
-    date: `${year}-${month}-${day}`,
-    time: `${hours}:${minutes}`
+    date: `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(
+      parts.day
+    ).padStart(2, '0')}`,
+    time: `${String(parts.hour).padStart(2, '0')}:${String(
+      parts.minute
+    ).padStart(2, '0')}`
   }
 }
 
@@ -139,4 +230,3 @@ export function isIsoInstant(value: string): value is IsoInstant {
   const parsed = new Date(value)
   return !Number.isNaN(parsed.valueOf()) && parsed.toISOString() === value
 }
-

@@ -231,6 +231,19 @@ export const MOUSE_EVENT_TYPES = [
 ] as const
 export type MouseEventType = (typeof MOUSE_EVENT_TYPES)[number]
 
+export const MANUAL_MOUSE_EVENT_TYPES = [
+  'medication',
+  'injection',
+  'surgery',
+  'behavior',
+  'sampling',
+  'observation',
+  'abnormality',
+  'custom'
+] as const satisfies readonly MouseEventType[]
+export type ManualMouseEventType =
+  (typeof MANUAL_MOUSE_EVENT_TYPES)[number]
+
 export interface EntitySnapshot {
   mouseLabel?: string
   cageNumber?: string
@@ -417,4 +430,3 @@ export type MouseKeeperEntity =
   | SavedView
   | AppSettings
   | BackupMetadata
-

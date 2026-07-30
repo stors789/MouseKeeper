@@ -668,6 +668,8 @@ describe('MouseKeeperService', () => {
       now: NOW,
       mouseId: mouse.id,
       measuredOn: TODAY,
+      measuredTime: '09:00' as const,
+      timeZone: 'Asia/Shanghai',
       value: 25,
       unit: 'g' as const
     }
@@ -678,6 +680,14 @@ describe('MouseKeeperService', () => {
     expect(await database.mouseEvents.count()).toBe(1)
     expect(first.value.event.sourceId).toBe(first.value.weight.id)
     expect(first.value.weight.eventId).toBe(first.value.event.id)
+    expect(first.value.weight).toMatchObject({
+      timeZone: 'Asia/Shanghai',
+      measuredAt: '2026-07-30T01:00:00.000Z'
+    })
+    expect(first.value.event).toMatchObject({
+      timeZone: 'Asia/Shanghai',
+      occurredAt: '2026-07-30T01:00:00.000Z'
+    })
 
     await service.softDeleteMouseEvent({
       operationId: operationId('delete-weight-event'),
@@ -691,6 +701,45 @@ describe('MouseKeeperService', () => {
     expect(
       (await database.weightRecords.get(first.value.weight.id))?.deletedFlag
     ).toBe(1)
+  })
+
+  it('keeps operational events behind their domain commands', async () => {
+    const mouse = await createMouse('EVENT-GUARD')
+    await expect(
+      service.createMouseEvent({
+        operationId: operationId('forged-death-event'),
+        now: NOW,
+        mouseId: mouse.id,
+        eventType: 'death',
+        occurredOn: TODAY,
+        title: 'Forged death'
+      } as unknown as Parameters<typeof service.createMouseEvent>[0])
+    ).rejects.toMatchObject({ code: 'invalid-state' })
+
+    const cage = await createCage('EVENT-GUARD-CAGE')
+    const moved = await service.moveMouse({
+      operationId: operationId('event-guard-move'),
+      now: NOW,
+      mouseId: mouse.id,
+      cageId: cage.id
+    })
+    await expect(
+      service.updateMouseEvent({
+        operationId: operationId('edit-operational-event'),
+        now: NOW,
+        eventId: moved.value.event.id,
+        expectedRevision: moved.value.event.revision,
+        patch: { title: 'Rewritten transfer' }
+      })
+    ).rejects.toMatchObject({ code: 'invalid-state' })
+    await expect(
+      service.softDeleteMouseEvent({
+        operationId: operationId('delete-operational-event'),
+        now: NOW,
+        eventId: moved.value.event.id,
+        expectedRevision: moved.value.event.revision
+      })
+    ).rejects.toMatchObject({ code: 'invalid-state' })
   })
 
   it('records quick-weight batches atomically', async () => {

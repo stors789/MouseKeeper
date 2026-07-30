@@ -15,6 +15,8 @@ import {
   instantToLocalDateTime,
   litterSchema,
   localDateTimeToInstant,
+  localTimeZone,
+  MANUAL_MOUSE_EVENT_TYPES,
   makeActiveKey,
   makeCompositeKey,
   mouseDisplayLabel,
@@ -120,6 +122,7 @@ import type {
 } from './types'
 
 const TERMINAL_MOUSE_STATUSES = new Set(['dead', 'euthanized', 'transferred'])
+const MANUAL_EVENT_TYPES = new Set<string>(MANUAL_MOUSE_EVENT_TYPES)
 const CURRENT_BREEDING_STATUSES = new Set(['planned', 'active'])
 const BREEDING_STATUS_TRANSITIONS = new Map([
   ['planned', new Set(['active', 'cancelled'])],
@@ -128,8 +131,6 @@ const BREEDING_STATUS_TRANSITIONS = new Map([
   ['completed', new Set<string>()],
   ['cancelled', new Set<string>()]
 ])
-const DEFAULT_TIME_ZONE = 'UTC'
-
 interface ActivityInput {
   action: string
   primaryEntityType: EntityType
@@ -243,15 +244,17 @@ function dueSortKey(date: string, time?: string): string {
 function resolveOccurredAt(
   date: string,
   time: string | undefined,
-  now: IsoInstant
+  now: IsoInstant,
+  timeZone: string = localTimeZone()
 ): IsoInstant {
   if (time) {
-    return localDateTimeToInstant(date, time)
+    return localDateTimeToInstant(date, time, timeZone)
   }
-  const currentLocal = instantToLocalDateTime(now)
+  const currentLocal = instantToLocalDateTime(now, timeZone)
   return localDateTimeToInstant(
     date,
-    date === currentLocal.date ? currentLocal.time : '00:00'
+    date === currentLocal.date ? currentLocal.time : '00:00',
+    timeZone
   )
 }
 
@@ -397,15 +400,32 @@ export class MouseKeeperService {
     now: IsoInstant,
     input: EventInput
   ): MouseEvent {
+    const timeZone = input.timeZone ?? localTimeZone()
     const occurredAt =
       input.occurredAt ??
-      resolveOccurredAt(input.occurredOn, input.occurredTime, now)
+      resolveOccurredAt(
+        input.occurredOn,
+        input.occurredTime,
+        now,
+        timeZone
+      )
+    const projected = instantToLocalDateTime(occurredAt, timeZone)
+    if (
+      projected.date !== input.occurredOn ||
+      (input.occurredTime !== undefined &&
+        projected.time !== input.occurredTime)
+    ) {
+      throw new ServiceError(
+        'invalid-state',
+        'Event date, time, time zone, and instant are inconsistent'
+      )
+    }
     const event: MouseEvent = mouseEventSchema.parse({
       ...baseFields(context, input.id ?? newId(), now),
       eventType: input.eventType,
       occurredOn: input.occurredOn,
-      occurredTime: input.occurredTime,
-      timeZone: input.timeZone ?? DEFAULT_TIME_ZONE,
+      occurredTime: input.occurredTime ?? projected.time,
+      timeZone,
       occurredAt,
       mouseId: input.mouse.id,
       cageId: input.cage?.id,
@@ -2779,6 +2799,12 @@ export class MouseKeeperService {
           input.mouseId,
           'Mouse'
         )
+        if (!MANUAL_EVENT_TYPES.has(input.eventType)) {
+          throw new ServiceError(
+            'invalid-state',
+            'Operational events must be created through their domain command'
+          )
+        }
         const cage = input.cageId
           ? await this.activeRecord(this.database.cages, input.cageId, 'Cage')
           : undefined
@@ -2862,10 +2888,10 @@ export class MouseKeeperService {
           'Mouse event'
         )
         this.assertRevision(current, input.expectedRevision)
-        if (current.eventType === 'weight') {
+        if (!MANUAL_EVENT_TYPES.has(current.eventType)) {
           throw new ServiceError(
             'invalid-state',
-            'Weight events must be edited through the weight service'
+            'Operational events cannot be edited through the general event service'
           )
         }
         const mouse = await this.database.mice.get(current.mouseId)
@@ -2898,6 +2924,7 @@ export class MouseKeeperService {
           'occurredTime' in input.patch
             ? input.patch.occurredTime ?? undefined
             : current.occurredTime
+        const timeZone = input.patch.timeZone ?? current.timeZone
         const title = input.patch.title ?? current.title
         const now = resolveNow(input)
         const event: MouseEvent = mouseEventSchema.parse({
@@ -2906,10 +2933,11 @@ export class MouseKeeperService {
           updatedAt: now,
           occurredOn,
           occurredTime,
-          timeZone: input.patch.timeZone ?? current.timeZone,
+          timeZone,
           occurredAt: localDateTimeToInstant(
             occurredOn,
-            occurredTime ?? '00:00'
+            occurredTime ?? '00:00',
+            timeZone
           ),
           cageId,
           experimentId,
@@ -2981,6 +3009,15 @@ export class MouseKeeperService {
           'Mouse event'
         )
         this.assertRevision(current, input.expectedRevision)
+        if (
+          current.eventType !== 'weight' &&
+          !MANUAL_EVENT_TYPES.has(current.eventType)
+        ) {
+          throw new ServiceError(
+            'invalid-state',
+            'Operational events cannot be deleted through the general event service'
+          )
+        }
         const now = resolveNow(input)
         const event: MouseEvent = mouseEventSchema.parse({
           ...current,
@@ -3062,11 +3099,16 @@ export class MouseKeeperService {
           'Mouse'
         )
         const now = resolveNow(input)
+        const timeZone = input.timeZone ?? localTimeZone()
         const measuredAt = resolveOccurredAt(
           input.measuredOn,
           input.measuredTime,
-          now
+          now,
+          timeZone
         )
+        const measuredTime =
+          input.measuredTime ??
+          instantToLocalDateTime(measuredAt, timeZone).time
         const valueGrams = input.unit === 'g' ? input.value : input.value / 1000
         const previous = await this.database.weightRecords
           .where('[mouseId+measuredAt]')
@@ -3105,8 +3147,8 @@ export class MouseKeeperService {
           mouseId: mouse.id,
           eventId,
           measuredOn: input.measuredOn,
-          measuredTime: input.measuredTime,
-          timeZone: input.timeZone ?? DEFAULT_TIME_ZONE,
+          measuredTime,
+          timeZone,
           measuredAt,
           value: input.value,
           unit: input.unit,
@@ -3119,8 +3161,8 @@ export class MouseKeeperService {
           mouse,
           eventType: 'weight',
           occurredOn: input.measuredOn,
-          occurredTime: input.measuredTime,
-          timeZone: input.timeZone,
+          occurredTime: measuredTime,
+          timeZone,
           occurredAt: measuredAt,
           title: `Weight ${input.value} ${input.unit}`,
           description: input.notes,
@@ -4261,8 +4303,7 @@ export class MouseKeeperService {
           return appSettingsSchema.parse(existing)
         }
         const now = new Date().toISOString()
-        const timeZone =
-          Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_TIME_ZONE
+        const timeZone = localTimeZone()
         const settings: AppSettings = appSettingsSchema.parse({
           ...baseFields(
             { operationId: 'settings.initialize', origin: 'system' },

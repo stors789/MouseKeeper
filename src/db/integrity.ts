@@ -11,6 +11,7 @@ import {
   experimentGroupSchema,
   experimentSchema,
   litterSchema,
+  localDateTimeToInstant,
   mouseEventSchema,
   mouseSchema,
   savedViewSchema,
@@ -546,6 +547,34 @@ export async function scanIntegrity(
           message: `Weight record references missing mouse ${weight.mouseId}`
         })
       }
+      try {
+        const expectedMeasuredAt = localDateTimeToInstant(
+          weight.measuredOn,
+          weight.measuredTime ?? '00:00',
+          weight.timeZone
+        )
+        if (expectedMeasuredAt !== weight.measuredAt) {
+          issues.push({
+            severity: 'error',
+            code: 'weight-time-mismatch',
+            table: 'weightRecords',
+            recordId: weight.id,
+            message:
+              'Weight date, time, time zone, and measuredAt are inconsistent'
+          })
+        }
+      } catch (error) {
+        issues.push({
+          severity: 'error',
+          code: 'invalid-weight-time-zone',
+          table: 'weightRecords',
+          recordId: weight.id,
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Weight time zone could not be resolved'
+        })
+      }
       checkWeightEventPair(weight, eventById.get(weight.eventId), issues)
     }
 
@@ -581,6 +610,34 @@ export async function scanIntegrity(
           recordId: event.id,
           relatedIds: [event.experimentId],
           message: `Mouse event references missing experiment ${event.experimentId}`
+        })
+      }
+      try {
+        const expectedOccurredAt = localDateTimeToInstant(
+          event.occurredOn,
+          event.occurredTime ?? '00:00',
+          event.timeZone
+        )
+        if (expectedOccurredAt !== event.occurredAt) {
+          issues.push({
+            severity: 'error',
+            code: 'event-time-mismatch',
+            table: 'mouseEvents',
+            recordId: event.id,
+            message:
+              'Event date, time, time zone, and occurredAt are inconsistent'
+          })
+        }
+      } catch (error) {
+        issues.push({
+          severity: 'error',
+          code: 'invalid-event-time-zone',
+          table: 'mouseEvents',
+          recordId: event.id,
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Event time zone could not be resolved'
         })
       }
       if (
