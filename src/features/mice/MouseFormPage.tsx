@@ -26,7 +26,10 @@ import {
   MOUSE_SEX_LABELS,
   MOUSE_STATUS_LABELS
 } from '../../lib/labels'
-import { WarningRequiredError } from '../../services'
+import {
+  WarningRequiredError,
+  type CreateMouseWithCageInput
+} from '../../services'
 
 const mouseFormSchema = z
   .object({
@@ -100,9 +103,7 @@ function optional(value: string): string | undefined {
 }
 
 interface PendingCageAssignment {
-  mouseId: string
-  cageId: string
-  operationId: string
+  input: CreateMouseWithCageInput
   warnings: readonly string[]
 }
 
@@ -196,7 +197,7 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
         return
       }
 
-      const result = await appService.createMouse({
+      const input: CreateMouseWithCageInput = {
         operationId: crypto.randomUUID(),
         earTag: optional(values.earTag),
         experimentNumber: optional(values.experimentNumber),
@@ -211,44 +212,33 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
         status: values.status,
         source: optional(values.source),
         coatColor: optional(values.coatColor),
-        notes: optional(values.notes)
-      })
-
-      if (values.cageId) {
-        const operationId = crypto.randomUUID()
-        try {
-          await appService.moveMouse({
-            operationId,
-            mouseId: result.value.id,
-            cageId: values.cageId,
-            reason: '建档时分配'
+        notes: optional(values.notes),
+        initialCageId: optional(values.cageId),
+        initialCageReason: '建档时分配'
+      }
+      let result
+      try {
+        result = await appService.createMouseWithCage(input)
+      } catch (error) {
+        if (error instanceof WarningRequiredError) {
+          setPendingCage({ input, warnings: error.warnings })
+          showToast({
+            title: '建档与笼位分配待确认',
+            description: '当前事务尚未写入；确认容量警告后再原子保存。',
+            tone: 'warning',
+            duration: 8000
           })
-        } catch (error) {
-          if (error instanceof WarningRequiredError) {
-            setPendingCage({
-              mouseId: result.value.id,
-              cageId: values.cageId,
-              operationId,
-              warnings: error.warnings
-            })
-            showToast({
-              title: '小鼠已创建，笼位待确认',
-              description: '目标笼位已满，确认后再完成分配。',
-              tone: 'warning',
-              duration: 8000
-            })
-            return
-          }
-          throw error
+          return
         }
+        throw error
       }
 
       showToast({
         title: '小鼠已创建',
-        description: mouseDisplayLabel(result.value),
+        description: mouseDisplayLabel(result.value.mouse),
         tone: 'positive'
       })
-      navigate(`/mice/${encodeURIComponent(result.value.id)}`)
+      navigate(`/mice/${encodeURIComponent(result.value.mouse.id)}`)
     } catch (error) {
       setSubmitError(readableError(error))
     }
@@ -258,18 +248,16 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
     if (!pendingCage) return
     setSubmitError(undefined)
     try {
-      await appService.moveMouse({
-        operationId: pendingCage.operationId,
-        mouseId: pendingCage.mouseId,
-        cageId: pendingCage.cageId,
-        reason: '建档时确认超容分配',
+      const result = await appService.createMouseWithCage({
+        ...pendingCage.input,
+        initialCageReason: '建档时确认超容分配',
         warningAcknowledgements: pendingCage.warnings
       })
       showToast({
         title: '小鼠已创建并分配笼位',
         tone: 'positive'
       })
-      navigate(`/mice/${encodeURIComponent(pendingCage.mouseId)}`)
+      navigate(`/mice/${encodeURIComponent(result.value.mouse.id)}`)
     } catch (error) {
       setSubmitError(readableError(error))
     }
@@ -322,20 +310,32 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
           title="目标笼位已达到或超过容量"
           tone="warning"
           action={
-            <Button
-              variant="secondary"
-              leadingIcon={<TriangleAlert aria-hidden="true" size={16} />}
-              onClick={() => void confirmCageAssignment()}
-            >
-              确认超容并分配
-            </Button>
+            <div className="alert-actions">
+              <Button
+                variant="tertiary"
+                onClick={() => setPendingCage(undefined)}
+              >
+                返回修改
+              </Button>
+              <Button
+                variant="secondary"
+                leadingIcon={<TriangleAlert aria-hidden="true" size={16} />}
+                onClick={() => void confirmCageAssignment()}
+              >
+                确认超容并原子保存
+              </Button>
+            </div>
           }
         >
-          小鼠档案已经保存。只有在明确确认后才会写入这次笼位分配。
+          当前事务尚未写入。表单已锁定，明确确认后才会同时创建档案和笼位分配。
         </Alert>
       ) : null}
 
       <form className="entity-form" onSubmit={(event) => void onSubmit(event)}>
+        <fieldset
+          className="form-fieldset-reset"
+          disabled={Boolean(pendingCage)}
+        >
         <section aria-labelledby="mouse-identity-heading" className="form-section">
           <div className="form-section__heading">
             <span className="assay-rail-mark" aria-hidden="true" />
@@ -547,6 +547,7 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
           </Link>
           <Button
             type="submit"
+            disabled={Boolean(pendingCage)}
             loading={isSubmitting}
             loadingLabel="正在保存小鼠…"
             leadingIcon={<Save aria-hidden="true" size={17} />}
@@ -554,6 +555,7 @@ export function MouseFormPage({ mouseId }: { mouseId?: string }) {
             {mouseId ? '保存档案更改' : '保存小鼠'}
           </Button>
         </div>
+        </fieldset>
       </form>
     </div>
   )

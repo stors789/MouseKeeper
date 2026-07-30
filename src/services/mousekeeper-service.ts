@@ -69,6 +69,8 @@ import type {
   CreateMouseEventInput,
   CreateMiceInput,
   CreateMouseInput,
+  CreateMouseWithCageInput,
+  CreateMouseWithCageValue,
   CreateTagInput,
   CreateTaskInput,
   DeleteSampleBatchInput,
@@ -570,6 +572,64 @@ export class MouseKeeperService {
           resultEntityIds: [mouse.id]
         })
         return { value: mouse, replayed: false, warnings: [] }
+      }
+    )
+  }
+
+  async createMouseWithCage(
+    input: CreateMouseWithCageInput
+  ): Promise<CommandResult<CreateMouseWithCageValue>> {
+    return this.database.transaction(
+      'rw',
+      [
+        this.database.mice,
+        this.database.tags,
+        this.database.cages,
+        this.database.cageAssignments,
+        this.database.mouseEvents,
+        this.database.activityLogs
+      ],
+      async () => {
+        const {
+          initialCageId,
+          initialCageReason,
+          operationId,
+          ...mouseInput
+        } = input
+        const created = await this.createMouse({
+          ...mouseInput,
+          operationId: `${operationId}:mouse`
+        })
+        if (!initialCageId) {
+          return {
+            value: { mouse: created.value },
+            replayed: created.replayed,
+            warnings: created.warnings
+          }
+        }
+
+        const moved = await this.moveMouse({
+          operationId: `${operationId}:cage`,
+          now: input.now,
+          origin: input.origin,
+          sampleBatchId: input.sampleBatchId,
+          importBatchId: input.importBatchId,
+          warningAcknowledgements: input.warningAcknowledgements,
+          mouseId: created.value.id,
+          cageId: initialCageId,
+          reason: initialCageReason ?? 'Created with initial cage assignment'
+        })
+        return {
+          value: {
+            mouse: moved.value.mouse,
+            assignment: moved.value.assignment,
+            event: moved.value.event
+          },
+          replayed: created.replayed && moved.replayed,
+          warnings: [
+            ...new Set([...created.warnings, ...moved.warnings])
+          ]
+        }
       }
     )
   }

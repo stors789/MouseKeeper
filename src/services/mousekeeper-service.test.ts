@@ -146,6 +146,56 @@ describe('MouseKeeperService', () => {
     )
   })
 
+  it('creates a mouse and initial cage assignment atomically', async () => {
+    const cage = await createCage('ATOMIC-CAGE', 1)
+    const resident = await createMouse('ATOMIC-RESIDENT')
+    await service.moveMouse({
+      operationId: operationId('atomic-resident'),
+      now: NOW,
+      mouseId: resident.id,
+      cageId: cage.id
+    })
+    const input = {
+      operationId: operationId('atomic-create'),
+      now: NOW,
+      id: 'atomic-new-mouse',
+      earTag: 'ATOMIC-NEW',
+      strain: 'C57BL/6J',
+      sex: 'female' as const,
+      initialCageId: cage.id
+    }
+
+    await expect(
+      service.createMouseWithCage(input)
+    ).rejects.toBeInstanceOf(WarningRequiredError)
+    expect(await database.mice.get(input.id)).toBeUndefined()
+    expect(await database.cageAssignments.count()).toBe(1)
+
+    const created = await service.createMouseWithCage({
+      ...input,
+      warningAcknowledgements: [WARNING_CODES.cageCapacityExceeded]
+    })
+    expect(created.value.mouse).toMatchObject({
+      id: input.id,
+      currentCageId: cage.id
+    })
+    expect(created.value.assignment?.cageId).toBe(cage.id)
+    expect(await database.cageAssignments.count()).toBe(2)
+
+    await expect(
+      service.createMouseWithCage({
+        ...input,
+        operationId: operationId('atomic-invalid-cage'),
+        id: 'atomic-invalid-cage-mouse',
+        earTag: 'ATOMIC-INVALID',
+        initialCageId: 'missing-cage'
+      })
+    ).rejects.toMatchObject({ code: 'not-found' })
+    expect(
+      await database.mice.get('atomic-invalid-cage-mouse')
+    ).toBeUndefined()
+  })
+
   it('blocks self-parenting and pedigree cycles', async () => {
     await expect(
       service.createMouse({

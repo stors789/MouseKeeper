@@ -80,6 +80,17 @@ export interface MouseBatchCreationValue {
   mice: Mouse[]
 }
 
+export interface CreateMouseWithCageInput extends CreateMouseInput {
+  initialCageId?: string
+  initialCageReason?: string
+}
+
+export interface CreateMouseWithCageValue {
+  mouse: Mouse
+  assignment?: CageAssignment
+  event?: MouseEvent
+}
+
 export interface UpdateMousePatch {
   earTag?: string | null
   experimentNumber?: string | null
