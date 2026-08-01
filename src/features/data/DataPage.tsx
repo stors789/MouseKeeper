@@ -150,7 +150,8 @@ export function DataPage() {
       deletedCages,
       deletedExperiments,
       deletedTasks,
-      deletedTags
+      deletedTags,
+      deletedEvents
     ] = await Promise.all([
       appDatabase.mice.toArray(),
       appDatabase.cages.toArray(),
@@ -168,7 +169,10 @@ export function DataPage() {
         .filter((item) => item.deletedFlag === 1)
         .toArray(),
       appDatabase.tasks.filter((item) => item.deletedFlag === 1).toArray(),
-      appDatabase.tags.filter((item) => item.deletedFlag === 1).toArray()
+      appDatabase.tags.filter((item) => item.deletedFlag === 1).toArray(),
+      appDatabase.mouseEvents
+        .filter((item) => item.deletedFlag === 1)
+        .toArray()
     ])
     const sampleCounts = new Map<string, number>()
     for (const entity of [...mice, ...cages, ...tags]) {
@@ -195,7 +199,8 @@ export function DataPage() {
         cages: deletedCages,
         experiments: deletedExperiments,
         tasks: deletedTasks,
-        tags: deletedTags
+        tags: deletedTags,
+        events: deletedEvents
       },
       sampleBatches: [...sampleCounts.entries()].map(([id, count]) => ({
         id,
@@ -270,13 +275,20 @@ export function DataPage() {
         backupBlob(safetyBackup),
         timestampFilename('mousekeeper-before-restore', 'json')
       )
-      await restoreDatabaseBackup(appDatabase, restoreFile)
+      const restoreResult = await restoreDatabaseBackup(
+        appDatabase,
+        restoreFile
+      )
+      downloadBlob(
+        backupBlob(restoreResult.preRestoreBackup),
+        timestampFilename('mousekeeper-exact-before-restore', 'json')
+      )
       setRestoreFile(undefined)
       setRestorePreview(undefined)
       setRestoreConfirmation('')
       showToast({
         title: '本地数据已恢复',
-        description: '恢复前安全备份也已下载。',
+        description: '已发起恢复前与事务内精确安全备份下载。',
         tone: 'positive',
         duration: 10_000
       })
@@ -446,10 +458,16 @@ export function DataPage() {
           taskId: id,
           expectedRevision: revision
         })
-      } else {
+      } else if (type === 'tag') {
         await appService.restoreTag({
           operationId: crypto.randomUUID(),
           tagId: id,
+          expectedRevision: revision
+        })
+      } else {
+        await appService.restoreMouseEvent({
+          operationId: crypto.randomUUID(),
+          eventId: id,
           expectedRevision: revision
         })
       }
@@ -540,6 +558,13 @@ export function DataPage() {
           revision: item.revision,
           label: item.name,
           deletedAt: item.deletedAt
+        })),
+        ...inventory.deleted.events.map((item) => ({
+          type: 'mouseEvent' as const,
+          id: item.id,
+          revision: item.revision,
+          label: item.title,
+          deletedAt: item.deletedAt
         }))
       ].toSorted((left, right) =>
         (right.deletedAt ?? '').localeCompare(left.deletedAt ?? '')
@@ -567,7 +592,7 @@ export function DataPage() {
         </Alert>
       ) : null}
 
-      <div className="segmented-tabs data-tabs" role="tablist" aria-label="数据工具">
+      <div className="segmented-tabs data-tabs" role="group" aria-label="数据工具">
         {(
           [
             ['backup', '备份与恢复'],
@@ -578,9 +603,9 @@ export function DataPage() {
           ] as const
         ).map(([value, label]) => (
           <button
-            aria-selected={tab === value}
+            aria-pressed={tab === value}
+            data-active={tab === value || undefined}
             key={value}
-            role="tab"
             type="button"
             onClick={() => setTab(value)}
           >
@@ -880,12 +905,15 @@ export function DataPage() {
               <p>恢复会重新检查唯一键；永久删除会先计算引用与影响范围。</p>
             </div>
           </header>
+          <Alert title="恢复档案不会重建已关闭的活动关系" tone="informative">
+            小鼠删除时关闭的当前笼位、实验成员和繁育关系，以及标签删除时解除的关联，会保留为历史记录但不会自动重新启用。
+          </Alert>
           {recycleItems.length === 0 ? (
             <EmptyState
               compact
               icon={ArchiveRestore}
               title="回收站为空"
-              description="软删除的小鼠、笼位、实验、任务和标签会出现在这里。"
+              description="软删除的小鼠、笼位、实验、任务、标签和手工事件会出现在这里。"
             />
           ) : (
             <ul className="recycle-list">

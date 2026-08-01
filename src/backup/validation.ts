@@ -4,7 +4,9 @@ import { APP_CONFIG } from '../config/app'
 import {
   entitySchemas,
   idSchema,
-  isoInstantSchema
+  isoInstantSchema,
+  localDateTimeToInstant,
+  normalizeText
 } from '../domain'
 import type {
   CageAssignment,
@@ -188,7 +190,8 @@ function checkRequiredTables(
 }
 
 function validateRows(
-  rawData: Record<string, unknown[]>
+  rawData: Record<string, unknown[]>,
+  expectedSchemaVersion: number
 ): { data: BackupData; issues: BackupIssue[] } {
   const issues: BackupIssue[] = []
 
@@ -230,6 +233,46 @@ function validateRows(
                     : ''
                 }`
               }
+            )
+          )
+        }
+      } else if (isRecord(row)) {
+        if (row.schemaVersion !== expectedSchemaVersion) {
+          issues.push(
+            issue(
+              'invalid-row',
+              `${table}[${index}] schemaVersion does not match the backup envelope`,
+              {
+                table,
+                recordId: rowId,
+                path: `data.${table}[${index}].schemaVersion`
+              }
+            )
+          )
+        }
+        if (
+          typeof row.createdAt === 'string' &&
+          typeof row.updatedAt === 'string' &&
+          row.createdAt > row.updatedAt
+        ) {
+          issues.push(
+            issue(
+              'invalid-row',
+              `${table}[${index}] updatedAt precedes createdAt`,
+              { table, recordId: rowId }
+            )
+          )
+        }
+        if (
+          typeof row.deletedAt === 'string' &&
+          typeof row.updatedAt === 'string' &&
+          row.deletedAt > row.updatedAt
+        ) {
+          issues.push(
+            issue(
+              'invalid-row',
+              `${table}[${index}] deletedAt follows updatedAt`,
+              { table, recordId: rowId }
             )
           )
         }
@@ -449,7 +492,8 @@ function validateReferences(data: BackupData): BackupIssue[] {
   const cageIds = new Set(cageById.keys())
   const pairById = new Map(data.breedingPairs.map(pair => [pair.id, pair]))
   const pairIds = new Set(pairById.keys())
-  const litterIds = new Set(data.litters.map(litter => litter.id))
+  const litterById = new Map(data.litters.map(litter => [litter.id, litter]))
+  const litterIds = new Set(litterById.keys())
   const experimentById = new Map(
     data.experiments.map(experiment => [experiment.id, experiment])
   )
@@ -508,6 +552,27 @@ function validateReferences(data: BackupData): BackupIssue[] {
         'tagIds',
         tagId,
         'tags'
+      )
+    }
+    const litter = mouse.litterId
+      ? litterById.get(mouse.litterId)
+      : undefined
+    if (
+      litter &&
+      (mouse.sireId !== litter.sireId ||
+        mouse.damId !== litter.damId ||
+        mouse.birthDate !== litter.bornOn)
+    ) {
+      issues.push(
+        issue(
+          'relation-mismatch',
+          'Mouse litter link does not match the litter parents and birth date',
+          {
+            table: 'mice',
+            recordId: mouse.id,
+            relatedIds: [litter.id]
+          }
+        )
       )
     }
   }
@@ -615,6 +680,20 @@ function validateReferences(data: BackupData): BackupIssue[] {
       pair.sireId,
       'mice'
     )
+    if (
+      pair.deletedFlag === 0 &&
+      (pair.status === 'planned' || pair.status === 'active') &&
+      (mouseById.get(pair.sireId)?.deletedFlag === 1 ||
+        mouseById.get(pair.damId)?.deletedFlag === 1)
+    ) {
+      issues.push(
+        issue(
+          'relation-mismatch',
+          'An active breeding pair cannot reference a deleted mouse',
+          { table: 'breedingPairs', recordId: pair.id }
+        )
+      )
+    }
     checkReference(
       issues,
       mouseIds,
@@ -721,6 +800,22 @@ function validateReferences(data: BackupData): BackupIssue[] {
       )
     }
     if (assignment.activeFlag === 1 && assignment.deletedFlag === 0) {
+      if (
+        mouseById.get(assignment.mouseId)?.deletedFlag === 1 ||
+        experimentById.get(assignment.experimentId)?.deletedFlag === 1 ||
+        groupById.get(assignment.groupId)?.deletedFlag === 1
+      ) {
+        issues.push(
+          issue(
+            'relation-mismatch',
+            'An active experiment assignment cannot reference a deleted record',
+            {
+              table: 'experimentAssignments',
+              recordId: assignment.id
+            }
+          )
+        )
+      }
       for (const key of [
         assignment.activeGroupMouseKey,
         assignment.activeExclusionMouseKey
@@ -776,6 +871,39 @@ function validateReferences(data: BackupData): BackupIssue[] {
       event.experimentId,
       'experiments'
     )
+    if (event.normalizedTitle !== normalizeText(event.title)) {
+      issues.push(
+        issue(
+          'relation-mismatch',
+          'MouseEvent normalizedTitle does not match title',
+          { table: 'mouseEvents', recordId: event.id }
+        )
+      )
+    }
+    try {
+      const expectedOccurredAt = localDateTimeToInstant(
+        event.occurredOn,
+        event.occurredTime ?? '00:00',
+        event.timeZone
+      )
+      if (expectedOccurredAt !== event.occurredAt) {
+        issues.push(
+          issue(
+            'relation-mismatch',
+            'MouseEvent date, time, timeZone, and occurredAt disagree',
+            { table: 'mouseEvents', recordId: event.id }
+          )
+        )
+      }
+    } catch {
+      issues.push(
+        issue(
+          'invalid-row',
+          'MouseEvent has an invalid timeZone or wall-clock value',
+          { table: 'mouseEvents', recordId: event.id }
+        )
+      )
+    }
   }
 
   const weightByEventId = new Map<string, string>()
@@ -799,6 +927,30 @@ function validateReferences(data: BackupData): BackupIssue[] {
       'mouseEvents'
     )
     const event = eventById.get(weight.eventId)
+    try {
+      const expectedMeasuredAt = localDateTimeToInstant(
+        weight.measuredOn,
+        weight.measuredTime ?? '00:00',
+        weight.timeZone
+      )
+      if (expectedMeasuredAt !== weight.measuredAt) {
+        issues.push(
+          issue(
+            'relation-mismatch',
+            'WeightRecord date, time, timeZone, and measuredAt disagree',
+            { table: 'weightRecords', recordId: weight.id }
+          )
+        )
+      }
+    } catch {
+      issues.push(
+        issue(
+          'invalid-row',
+          'WeightRecord has an invalid timeZone or wall-clock value',
+          { table: 'weightRecords', recordId: weight.id }
+        )
+      )
+    }
     if (
       event &&
       (event.eventType !== 'weight' ||
@@ -877,6 +1029,18 @@ function validateReferences(data: BackupData): BackupIssue[] {
       'experiments',
       'warning'
     )
+    const expectedDueSortKey = `${task.dueDate}T${
+      task.dueTime ?? '23:59'
+    }`
+    if (task.dueSortKey !== expectedDueSortKey) {
+      issues.push(
+        issue(
+          'relation-mismatch',
+          'Task dueSortKey does not match dueDate and dueTime',
+          { table: 'tasks', recordId: task.id }
+        )
+      )
+    }
   }
 
   checkUniqueValues(
@@ -1066,7 +1230,7 @@ export async function parseAndValidateBackup(
   }
 
   const rawData = candidate.data
-  const rowResult = validateRows(rawData)
+  const rowResult = validateRows(rawData, candidate.schemaVersion)
   issues.push(...rowResult.issues)
   const actualCounts = countTables(rowResult.data)
   for (const table of BACKUP_TABLE_NAMES) {

@@ -414,6 +414,13 @@ export interface ExitExperimentAssignmentInput extends CommandContext {
   reason?: string
 }
 
+export interface ExitExperimentAssignmentsInput extends CommandContext {
+  assignmentIds: readonly string[]
+  exitedOn: LocalDate
+  exitedTime?: LocalTime
+  reason?: string
+}
+
 export interface CreateMouseEventInput extends CommandContext {
   id?: string
   mouseId: string
@@ -444,6 +451,11 @@ export interface UpdateMouseEventInput extends CommandContext {
 }
 
 export interface SoftDeleteMouseEventInput extends CommandContext {
+  eventId: string
+  expectedRevision?: number
+}
+
+export interface RestoreMouseEventInput extends CommandContext {
   eventId: string
   expectedRevision?: number
 }

@@ -203,6 +203,7 @@ describe('MouseKeeperService', () => {
     const moveInput = {
       operationId: operationId('batch-move'),
       now: NOW,
+      importBatchId: 'batch-provenance',
       mouseIds: [first.id, second.id],
       cageId: cage.id
     }
@@ -225,6 +226,7 @@ describe('MouseKeeperService', () => {
     const status = await service.changeMiceStatus({
       operationId: operationId('batch-status'),
       now: NOW,
+      importBatchId: 'batch-provenance',
       targets: moved.value.mice.map(mouse => ({
         mouseId: mouse.id,
         expectedRevision: mouse.revision
@@ -248,6 +250,7 @@ describe('MouseKeeperService', () => {
     const tagBatchInput = {
       operationId: operationId('batch-tags'),
       now: NOW,
+      importBatchId: 'batch-provenance',
       targets: status.value.mice.map(mouse => ({
         mouseId: mouse.id,
         expectedRevision: mouse.revision
@@ -264,6 +267,17 @@ describe('MouseKeeperService', () => {
     expect(tagReplay.value.updatedMouseIds).toEqual(
       tagged.value.updatedMouseIds
     )
+    const childLogs = await database.activityLogs
+      .filter((log) =>
+        ['batch-move', 'batch-status', 'batch-tags'].some((prefix) =>
+          log.operationId.startsWith(prefix)
+        )
+      )
+      .toArray()
+    expect(childLogs.length).toBeGreaterThanOrEqual(6)
+    expect(
+      childLogs.every((log) => log.importBatchId === 'batch-provenance')
+    ).toBe(true)
   })
 
   it('rejects dangling litter references without partial writes', async () => {
@@ -579,7 +593,7 @@ describe('MouseKeeperService', () => {
         exclusionSet: 'arm'
       })
     ).value
-    await service.assignMouseToExperiment({
+    const firstAssignment = await service.assignMouseToExperiment({
       operationId: operationId('assign-control'),
       now: NOW,
       mouseId: mouse.id,
@@ -587,6 +601,15 @@ describe('MouseKeeperService', () => {
       groupId: control.id,
       joinedOn: TODAY
     })
+    await expect(
+      service.updateExperiment({
+        operationId: operationId('close-active-experiment'),
+        now: NOW,
+        experimentId: experiment.id,
+        expectedRevision: experiment.revision,
+        patch: { status: 'completed' }
+      })
+    ).rejects.toMatchObject({ code: 'invalid-state' })
     await expect(
       service.assignMouseToExperiment({
         operationId: operationId('assign-treatment'),
@@ -598,6 +621,41 @@ describe('MouseKeeperService', () => {
       })
     ).rejects.toMatchObject({
       code: 'exclusive-group-conflict'
+    })
+    const secondMouse = await createMouse('EXP-MOUSE-2')
+    const secondAssignment = await service.assignMouseToExperiment({
+      operationId: operationId('assign-control-second'),
+      now: NOW,
+      mouseId: secondMouse.id,
+      experimentId: experiment.id,
+      groupId: control.id,
+      joinedOn: TODAY
+    })
+    const exited = await service.exitExperimentAssignments({
+      operationId: operationId('batch-exit-experiment'),
+      now: NOW,
+      assignmentIds: [
+        firstAssignment.value.assignment.id,
+        secondAssignment.value.assignment.id
+      ],
+      exitedOn: TODAY,
+      reason: 'batch endpoint'
+    })
+    expect(
+      exited.value.entries.every(
+        (entry) => entry.assignment.activeFlag === 0
+      )
+    ).toBe(true)
+    await expect(
+      service.updateExperiment({
+        operationId: operationId('close-empty-experiment'),
+        now: NOW,
+        experimentId: experiment.id,
+        expectedRevision: experiment.revision,
+        patch: { status: 'completed' }
+      })
+    ).resolves.toMatchObject({
+      value: { status: 'completed' }
     })
   })
 
@@ -742,7 +800,7 @@ describe('MouseKeeperService', () => {
       occurredAt: '2026-07-30T01:00:00.000Z'
     })
 
-    await service.softDeleteMouseEvent({
+    const deleted = await service.softDeleteMouseEvent({
       operationId: operationId('delete-weight-event'),
       now: '2026-07-30T09:00:00.000Z',
       eventId: first.value.event.id,
@@ -754,6 +812,16 @@ describe('MouseKeeperService', () => {
     expect(
       (await database.weightRecords.get(first.value.weight.id))?.deletedFlag
     ).toBe(1)
+    const restored = await service.restoreMouseEvent({
+      operationId: operationId('restore-weight-event'),
+      now: '2026-07-30T10:00:00.000Z',
+      eventId: deleted.value.id,
+      expectedRevision: deleted.value.revision
+    })
+    expect(restored.value.deletedFlag).toBe(0)
+    expect(
+      (await database.weightRecords.get(first.value.weight.id))?.deletedFlag
+    ).toBe(0)
   })
 
   it('keeps operational events behind their domain commands', async () => {

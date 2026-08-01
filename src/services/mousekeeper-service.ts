@@ -85,6 +85,7 @@ import type {
   ExperimentBatchAssignmentValue,
   ExperimentCreationValue,
   ExitExperimentAssignmentInput,
+  ExitExperimentAssignmentsInput,
   LeaveCageInput,
   LeaveCageValue,
   LitterCreationValue,
@@ -100,6 +101,7 @@ import type {
   RestoreCageInput,
   RestoreExperimentInput,
   RestoreMouseInput,
+  RestoreMouseEventInput,
   RestoreSavedViewInput,
   RestoreTagInput,
   RestoreTaskInput,
@@ -760,6 +762,8 @@ export class MouseKeeperService {
               operationId: `${input.operationId}:${index}`,
               now: input.now,
               origin: input.origin,
+              sampleBatchId: input.sampleBatchId,
+              importBatchId: input.importBatchId,
               warningAcknowledgements: input.warningAcknowledgements,
               mouseId: target.mouseId,
               expectedRevision: target.expectedRevision,
@@ -799,6 +803,8 @@ export class MouseKeeperService {
               operationId: `${input.operationId}:${index}`,
               now: input.now,
               origin: input.origin,
+              sampleBatchId: input.sampleBatchId,
+              importBatchId: input.importBatchId,
               warningAcknowledgements: input.warningAcknowledgements,
               mouseId,
               cageId: input.cageId,
@@ -860,6 +866,9 @@ export class MouseKeeperService {
               operationId: childOperationId,
               now: input.now,
               origin: input.origin,
+              sampleBatchId: input.sampleBatchId,
+              importBatchId: input.importBatchId,
+              warningAcknowledgements: input.warningAcknowledgements,
               mouseId: target.mouseId,
               expectedRevision: target.expectedRevision,
               tagIds: []
@@ -891,6 +900,9 @@ export class MouseKeeperService {
               operationId: childOperationId,
               now: input.now,
               origin: input.origin,
+              sampleBatchId: input.sampleBatchId,
+              importBatchId: input.importBatchId,
+              warningAcknowledgements: input.warningAcknowledgements,
               mouseId: target.mouseId,
               expectedRevision: target.expectedRevision,
               tagIds: nextTagIds
@@ -2253,7 +2265,11 @@ export class MouseKeeperService {
     const action = 'experiment.update'
     return this.database.transaction(
       'rw',
-      [this.database.experiments, this.database.activityLogs],
+      [
+        this.database.experiments,
+        this.database.experimentAssignments,
+        this.database.activityLogs
+      ],
       async () => {
         const replay = await this.operationLog(input.operationId, action)
         if (replay) {
@@ -2274,6 +2290,19 @@ export class MouseKeeperService {
           'Experiment'
         )
         this.assertRevision(current, input.expectedRevision)
+        const nextStatus = input.patch.status ?? current.status
+        if (
+          !['planned', 'active'].includes(nextStatus) &&
+          (await this.database.experimentAssignments
+            .where('[experimentId+activeFlag]')
+            .equals([current.id, 1])
+            .count()) > 0
+        ) {
+          throw new ServiceError(
+            'invalid-state',
+            'Exit all active experiment members before closing the experiment'
+          )
+        }
         const code =
           'code' in input.patch
             ? withoutEmpty(input.patch.code)
@@ -2317,7 +2346,7 @@ export class MouseKeeperService {
             'endDate' in input.patch
               ? input.patch.endDate ?? undefined
               : current.endDate,
-          status: input.patch.status ?? current.status,
+          status: nextStatus,
           intervention:
             'intervention' in input.patch
               ? withoutEmpty(input.patch.intervention)
@@ -2394,6 +2423,12 @@ export class MouseKeeperService {
           input.experimentId,
           'Experiment'
         )
+        if (!['planned', 'active'].includes(experiment.status)) {
+          throw new ServiceError(
+            'invalid-state',
+            `Cannot create a group in an experiment with ${experiment.status} status`
+          )
+        }
         const activeGroupNameKey = makeCompositeKey(
           'experiment-group',
           experiment.id,
@@ -2773,6 +2808,61 @@ export class MouseKeeperService {
     )
   }
 
+  async exitExperimentAssignments(
+    input: ExitExperimentAssignmentsInput
+  ): Promise<CommandResult<ExperimentBatchAssignmentValue>> {
+    const assignmentIds = [...new Set(input.assignmentIds)]
+    if (assignmentIds.length === 0) {
+      throw new ServiceError(
+        'invalid-state',
+        'At least one experiment assignment must be selected'
+      )
+    }
+    if (assignmentIds.length !== input.assignmentIds.length) {
+      throw new ServiceError(
+        'invalid-state',
+        'The batch contains duplicate experiment assignment IDs'
+      )
+    }
+    return this.database.transaction(
+      'rw',
+      [
+        this.database.mice,
+        this.database.experiments,
+        this.database.experimentGroups,
+        this.database.experimentAssignments,
+        this.database.mouseEvents,
+        this.database.activityLogs
+      ],
+      async () => {
+        const results: CommandResult<ExperimentAssignmentValue>[] = []
+        for (const [index, assignmentId] of assignmentIds.entries()) {
+          results.push(
+            await this.exitExperimentAssignment({
+              operationId: `${input.operationId}:${index}`,
+              now: input.now,
+              origin: input.origin,
+              sampleBatchId: input.sampleBatchId,
+              importBatchId: input.importBatchId,
+              warningAcknowledgements: input.warningAcknowledgements,
+              assignmentId,
+              exitedOn: input.exitedOn,
+              exitedTime: input.exitedTime,
+              reason: input.reason
+            })
+          )
+        }
+        return {
+          value: { entries: results.map(result => result.value) },
+          replayed: results.every(result => result.replayed),
+          warnings: [
+            ...new Set(results.flatMap(result => [...result.warnings]))
+          ]
+        }
+      }
+    )
+  }
+
   async createMouseEvent(
     input: CreateMouseEventInput
   ): Promise<CommandResult<MouseEvent>> {
@@ -3058,6 +3148,92 @@ export class MouseKeeperService {
           primaryEntityType: 'mouseEvent',
           primaryEntityId: event.id,
           summary: `Deleted event ${event.title}`,
+          resultEntityIds: [event.id]
+        })
+        return { value: event, replayed: false, warnings: [] }
+      }
+    )
+  }
+
+  async restoreMouseEvent(
+    input: RestoreMouseEventInput
+  ): Promise<CommandResult<MouseEvent>> {
+    const action = 'mouse-event.restore'
+    return this.database.transaction(
+      'rw',
+      [
+        this.database.mouseEvents,
+        this.database.weightRecords,
+        this.database.activityLogs
+      ],
+      async () => {
+        const replay = await this.operationLog(input.operationId, action)
+        if (replay) {
+          const event = await this.database.mouseEvents.get(
+            this.resultId(replay)
+          )
+          if (!event) {
+            throw new ServiceError(
+              'integrity-error',
+              'Restored event referenced by activity log is missing'
+            )
+          }
+          return { value: event, replayed: true, warnings: [] }
+        }
+        const current = await this.database.mouseEvents.get(input.eventId)
+        if (!current) {
+          throw new ServiceError('not-found', 'Mouse event was not found')
+        }
+        this.assertRevision(current, input.expectedRevision)
+        if (current.deletedFlag !== 1) {
+          throw new ServiceError(
+            'invalid-state',
+            'Mouse event is not in the recycle bin'
+          )
+        }
+        if (
+          current.eventType !== 'weight' &&
+          !MANUAL_EVENT_TYPES.has(current.eventType)
+        ) {
+          throw new ServiceError(
+            'invalid-state',
+            'Operational events cannot be restored through the general event service'
+          )
+        }
+        const now = resolveNow(input)
+        const event: MouseEvent = mouseEventSchema.parse({
+          ...current,
+          revision: current.revision + 1,
+          updatedAt: now,
+          deletedAt: null,
+          deletedFlag: 0
+        })
+        if (current.eventType === 'weight') {
+          const weight = await this.database.weightRecords
+            .where('eventId')
+            .equals(current.id)
+            .first()
+          if (!weight || weight.deletedFlag !== 1) {
+            throw new ServiceError(
+              'integrity-error',
+              'Deleted weight event has no matching deleted WeightRecord'
+            )
+          }
+          const restoredWeight: WeightRecord = weightRecordSchema.parse({
+            ...weight,
+            revision: weight.revision + 1,
+            updatedAt: now,
+            deletedAt: null,
+            deletedFlag: 0
+          })
+          await this.database.weightRecords.put(restoredWeight)
+        }
+        await this.database.mouseEvents.put(event)
+        await this.addActivity(input, now, {
+          action,
+          primaryEntityType: 'mouseEvent',
+          primaryEntityId: event.id,
+          summary: `Restored event ${event.title}`,
           resultEntityIds: [event.id]
         })
         return { value: event, replayed: false, warnings: [] }

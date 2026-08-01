@@ -66,9 +66,12 @@ export function ExperimentDetailPage({
   const { showToast } = useToast()
   const [groupOpen, setGroupOpen] = useState(false)
   const [assignmentOpen, setAssignmentOpen] = useState(false)
+  const [exitBatchOpen, setExitBatchOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [selectedGroupId, setSelectedGroupId] = useState('')
   const [selectedMouseIds, setSelectedMouseIds] = useState<string[]>([])
+  const [selectedExitAssignmentIds, setSelectedExitAssignmentIds] =
+    useState<string[]>([])
   const [assignmentWarning, setAssignmentWarning] =
     useState<AssignmentWarning>()
   const [busy, setBusy] = useState<string>()
@@ -252,7 +255,32 @@ export function ExperimentDetailPage({
         exitedOn: todayLocalDate(),
         reason: '从实验详情页移出'
       })
+      setSelectedExitAssignmentIds((current) =>
+        current.filter((id) => id !== assignmentId)
+      )
       showToast({ title: '小鼠已退出实验组', tone: 'positive' })
+    })
+  }
+
+  const submitBatchExit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (selectedExitAssignmentIds.length === 0) return
+    const values = new FormData(event.currentTarget)
+    void run('exit-batch', async () => {
+      await appService.exitExperimentAssignments({
+        operationId: crypto.randomUUID(),
+        assignmentIds: selectedExitAssignmentIds,
+        exitedOn: formString(values, 'exitedOn'),
+        reason: optional(formString(values, 'reason'))
+      })
+      const count = selectedExitAssignmentIds.length
+      setSelectedExitAssignmentIds([])
+      setExitBatchOpen(false)
+      showToast({
+        title: '实验成员已批量退出',
+        description: `${count} 条成员关系已在一个事务中关闭`,
+        tone: 'positive'
+      })
     })
   }
 
@@ -347,6 +375,14 @@ export function ExperimentDetailPage({
           >
             批量加入小鼠
           </Button>
+          <Button
+            variant="secondary"
+            disabled={selectedExitAssignmentIds.length === 0}
+            leadingIcon={<LogOut aria-hidden="true" size={17} />}
+            onClick={() => setExitBatchOpen(true)}
+          >
+            批量退出 {selectedExitAssignmentIds.length || ''}
+          </Button>
         </div>
       </header>
 
@@ -422,6 +458,22 @@ export function ExperimentDetailPage({
                             const mouse = data.mouseById.get(assignment.mouseId)
                             return (
                               <li key={assignment.id}>
+                                <input
+                                  aria-label={`选择退出 ${assignment.mouseLabelSnapshot}`}
+                                  type="checkbox"
+                                  checked={selectedExitAssignmentIds.includes(
+                                    assignment.id
+                                  )}
+                                  onChange={(event) =>
+                                    setSelectedExitAssignmentIds((current) =>
+                                      event.target.checked
+                                        ? [...current, assignment.id]
+                                        : current.filter(
+                                            (id) => id !== assignment.id
+                                          )
+                                    )
+                                  }
+                                />
                                 <div>
                                   {mouse ? (
                                     <Link
@@ -721,6 +773,53 @@ export function ExperimentDetailPage({
             </div>
           </form>
         )}
+      </Dialog>
+
+      <Dialog
+        open={exitBatchOpen}
+        onOpenChange={setExitBatchOpen}
+        title="批量退出实验成员"
+        description="所选成员会在一个事务中关闭；任一条失败时整批回滚。"
+      >
+        <form className="dialog-form" onSubmit={submitBatchExit}>
+          <Alert
+            title={`将退出 ${selectedExitAssignmentIds.length} 条成员关系`}
+            tone="warning"
+          >
+            历史分组、加入事件和退出原因都会保留。
+          </Alert>
+          <Field id="exit-batch-date" label="退出日期" required>
+            <Input
+              defaultValue={todayLocalDate()}
+              name="exitedOn"
+              required
+              type="date"
+            />
+          </Field>
+          <Field id="exit-batch-reason" label="退出原因">
+            <Textarea
+              name="reason"
+              rows={3}
+              defaultValue="从实验详情页批量移出"
+            />
+          </Field>
+          <div className="form-actions">
+            <Button
+              type="button"
+              variant="tertiary"
+              onClick={() => setExitBatchOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              type="submit"
+              loading={busy === 'exit-batch'}
+              disabled={selectedExitAssignmentIds.length === 0}
+            >
+              确认批量退出
+            </Button>
+          </div>
+        </form>
       </Dialog>
 
       <Dialog

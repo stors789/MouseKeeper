@@ -34,6 +34,7 @@ import {
   mouseDisplayLabel,
   todayLocalDate,
   type ManualMouseEventType,
+  type MouseEvent,
   type MouseStatus,
   type WeightUnit
 } from '../../domain'
@@ -51,6 +52,12 @@ import { WarningRequiredError } from '../../services'
 import { MouseStatusChip } from './MouseStatusChip'
 
 const EVENT_OPTIONS = MANUAL_MOUSE_EVENT_TYPES
+
+function isManualEventType(
+  value: MouseEvent['eventType']
+): value is ManualMouseEventType {
+  return (MANUAL_MOUSE_EVENT_TYPES as readonly string[]).includes(value)
+}
 
 function optional(value: string): string | undefined {
   const trimmed = value.trim()
@@ -99,6 +106,8 @@ export function MouseDetailPage({ mouseId }: { mouseId: string }) {
   const [statusOpen, setStatusOpen] = useState(false)
   const [moveOpen, setMoveOpen] = useState(false)
   const [eventOpen, setEventOpen] = useState(false)
+  const [editingEvent, setEditingEvent] = useState<MouseEvent>()
+  const [deletingEvent, setDeletingEvent] = useState<MouseEvent>()
   const [weightOpen, setWeightOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [moveWarning, setMoveWarning] = useState<MoveWarning>()
@@ -319,18 +328,53 @@ export function MouseDetailPage({ mouseId }: { mouseId: string }) {
       'eventType'
     ) as ManualMouseEventType
     void runAction('event', async () => {
-      await appService.createMouseEvent({
-        operationId: crypto.randomUUID(),
-        mouseId,
-        eventType,
-        occurredOn: formString(values, 'occurredOn'),
-        occurredTime: optional(formString(values, 'occurredTime')),
-        title: formString(values, 'title'),
-        description: optional(formString(values, 'description')),
-        cageId: data?.mouse?.currentCageId
-      })
+      const occurredOn = formString(values, 'occurredOn')
+      const occurredTime = optional(formString(values, 'occurredTime'))
+      const title = formString(values, 'title')
+      const description = optional(formString(values, 'description'))
+      if (editingEvent) {
+        await appService.updateMouseEvent({
+          operationId: crypto.randomUUID(),
+          eventId: editingEvent.id,
+          expectedRevision: editingEvent.revision,
+          patch: {
+            occurredOn,
+            occurredTime: occurredTime ?? null,
+            title,
+            description: description ?? null
+          }
+        })
+      } else {
+        await appService.createMouseEvent({
+          operationId: crypto.randomUUID(),
+          mouseId,
+          eventType,
+          occurredOn,
+          occurredTime,
+          title,
+          description,
+          cageId: data?.mouse?.currentCageId
+        })
+      }
       setEventOpen(false)
-      showToast({ title: '事件已记录', tone: 'positive' })
+      setEditingEvent(undefined)
+      showToast({
+        title: editingEvent ? '事件已更新' : '事件已记录',
+        tone: 'positive'
+      })
+    })
+  }
+
+  const deleteManualEvent = () => {
+    if (!deletingEvent) return
+    void runAction('event-delete', async () => {
+      await appService.softDeleteMouseEvent({
+        operationId: crypto.randomUUID(),
+        eventId: deletingEvent.id,
+        expectedRevision: deletingEvent.revision
+      })
+      setDeletingEvent(undefined)
+      showToast({ title: '事件已移入回收状态', tone: 'positive' })
     })
   }
 
@@ -566,7 +610,10 @@ export function MouseDetailPage({ mouseId }: { mouseId: string }) {
         <Button
           variant="secondary"
           leadingIcon={<NotebookPen aria-hidden="true" size={17} />}
-          onClick={() => setEventOpen(true)}
+          onClick={() => {
+            setEditingEvent(undefined)
+            setEventOpen(true)
+          }}
         >
           记录事件
         </Button>
@@ -675,7 +722,10 @@ export function MouseDetailPage({ mouseId }: { mouseId: string }) {
                 <p>TRACEABILITY</p>
                 <h3 id="mouse-timeline-title">完整时间线</h3>
               </div>
-              <Link className="section-link" href={`/records?mouse=${mouse.id}`}>
+              <Link
+                className="section-link"
+                href={`/records?mouse=${encodeURIComponent(mouse.id)}`}
+              >
                 在记录中心查看
               </Link>
             </header>
@@ -701,6 +751,33 @@ export function MouseDetailPage({ mouseId }: { mouseId: string }) {
                         {item.occurredOn}
                         {item.occurredTime ? ` ${item.occurredTime}` : ''}
                       </time>
+                      {isManualEventType(item.eventType) ? (
+                        <div className="row-actions timeline-item-actions">
+                          <Button
+                            size="small"
+                            variant="tertiary"
+                            leadingIcon={
+                              <FilePenLine aria-hidden="true" size={15} />
+                            }
+                            onClick={() => {
+                              setEditingEvent(item)
+                              setEventOpen(true)
+                            }}
+                          >
+                            编辑
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="tertiary"
+                            leadingIcon={
+                              <Trash2 aria-hidden="true" size={15} />
+                            }
+                            onClick={() => setDeletingEvent(item)}
+                          >
+                            删除
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
                   </li>
                 ))}
@@ -1006,15 +1083,27 @@ export function MouseDetailPage({ mouseId }: { mouseId: string }) {
 
       <Dialog
         open={eventOpen}
-        onOpenChange={setEventOpen}
-        title="记录事件"
-        description="一般观察、给药、采样和操作等记录将加入完整时间线。"
+        onOpenChange={(open) => {
+          setEventOpen(open)
+          if (!open) setEditingEvent(undefined)
+        }}
+        title={editingEvent ? '编辑事件' : '记录事件'}
+        description={
+          editingEvent
+            ? '只有手工记录的一般事件可以编辑；系统业务事实保持只读。'
+            : '一般观察、给药、采样和操作等记录将加入完整时间线。'
+        }
       >
-        <form className="dialog-form" onSubmit={submitEvent}>
+        <form
+          className="dialog-form"
+          key={editingEvent?.id ?? 'new-event'}
+          onSubmit={submitEvent}
+        >
           <Field id="event-type" label="事件类型" required>
             <Select
+              disabled={Boolean(editingEvent)}
               name="eventType"
-              defaultValue="observation"
+              defaultValue={editingEvent?.eventType ?? 'observation'}
               options={EVENT_OPTIONS.map((value) => ({
                 value,
                 label: EVENT_TYPE_LABELS[value]
@@ -1024,35 +1113,79 @@ export function MouseDetailPage({ mouseId }: { mouseId: string }) {
           <div className="form-grid">
             <Field id="event-date" label="发生日期" required>
               <Input
-                defaultValue={todayLocalDate()}
+                defaultValue={editingEvent?.occurredOn ?? todayLocalDate()}
                 name="occurredOn"
                 required
                 type="date"
               />
             </Field>
             <Field id="event-time" label="发生时间">
-              <Input name="occurredTime" type="time" />
+              <Input
+                defaultValue={editingEvent?.occurredTime}
+                name="occurredTime"
+                type="time"
+              />
             </Field>
           </div>
           <Field id="event-title" label="标题" required>
-            <Input maxLength={200} name="title" required />
+            <Input
+              defaultValue={editingEvent?.title}
+              maxLength={200}
+              name="title"
+              required
+            />
           </Field>
           <Field id="event-description" label="描述">
-            <Textarea maxLength={10_000} name="description" rows={5} />
+            <Textarea
+              defaultValue={editingEvent?.description}
+              maxLength={10_000}
+              name="description"
+              rows={5}
+            />
           </Field>
           <div className="form-actions">
             <Button
               variant="tertiary"
               type="button"
-              onClick={() => setEventOpen(false)}
+              onClick={() => {
+                setEventOpen(false)
+                setEditingEvent(undefined)
+              }}
             >
               取消
             </Button>
             <Button type="submit" loading={busyAction === 'event'}>
-              保存事件
+              {editingEvent ? '保存更改' : '保存事件'}
             </Button>
           </div>
         </form>
+      </Dialog>
+
+      <Dialog
+        description="删除后事件不再出现在时间线；系统生成的业务事件不能在这里删除。"
+        open={Boolean(deletingEvent)}
+        title="删除手工事件？"
+        onOpenChange={open => {
+          if (!open) setDeletingEvent(undefined)
+        }}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDeletingEvent(undefined)}>
+              取消
+            </Button>
+            <Button
+              loading={busyAction === 'event-delete'}
+              variant="danger"
+              onClick={deleteManualEvent}
+            >
+              删除事件
+            </Button>
+          </>
+        }
+      >
+        <Alert title={deletingEvent?.title ?? '当前事件'} tone="warning">
+          该操作会保留审计日志，但事件本身将进入软删除状态。
+        </Alert>
       </Dialog>
 
       <Dialog

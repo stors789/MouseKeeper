@@ -41,11 +41,10 @@ function randomId(): string {
   ].join('-')
 }
 
-async function readAllTables(
+async function readAllTablesInCurrentTransaction(
   database: MouseKeeperDatabase
 ): Promise<BackupData> {
-  return database.transaction('r', database.tables, async () => {
-    const [
+  const [
       mice,
       cages,
       cageAssignments,
@@ -63,43 +62,50 @@ async function readAllTables(
       appSettings,
       backupMetadata
     ] = await Promise.all([
-      database.mice.toArray(),
-      database.cages.toArray(),
-      database.cageAssignments.toArray(),
-      database.breedingPairs.toArray(),
-      database.litters.toArray(),
-      database.experiments.toArray(),
-      database.experimentGroups.toArray(),
-      database.experimentAssignments.toArray(),
-      database.mouseEvents.toArray(),
-      database.weightRecords.toArray(),
-      database.tasks.toArray(),
-      database.tags.toArray(),
-      database.activityLogs.toArray(),
-      database.savedViews.toArray(),
-      database.appSettings.toArray(),
-      database.backupMetadata.toArray()
-    ])
+    database.mice.toArray(),
+    database.cages.toArray(),
+    database.cageAssignments.toArray(),
+    database.breedingPairs.toArray(),
+    database.litters.toArray(),
+    database.experiments.toArray(),
+    database.experimentGroups.toArray(),
+    database.experimentAssignments.toArray(),
+    database.mouseEvents.toArray(),
+    database.weightRecords.toArray(),
+    database.tasks.toArray(),
+    database.tags.toArray(),
+    database.activityLogs.toArray(),
+    database.savedViews.toArray(),
+    database.appSettings.toArray(),
+    database.backupMetadata.toArray()
+  ])
 
-    return {
-      mice,
-      cages,
-      cageAssignments,
-      breedingPairs,
-      litters,
-      experiments,
-      experimentGroups,
-      experimentAssignments,
-      mouseEvents,
-      weightRecords,
-      tasks,
-      tags,
-      activityLogs,
-      savedViews,
-      appSettings,
-      backupMetadata
-    }
-  })
+  return {
+    mice,
+    cages,
+    cageAssignments,
+    breedingPairs,
+    litters,
+    experiments,
+    experimentGroups,
+    experimentAssignments,
+    mouseEvents,
+    weightRecords,
+    tasks,
+    tags,
+    activityLogs,
+    savedViews,
+    appSettings,
+    backupMetadata
+  }
+}
+
+async function readAllTables(
+  database: MouseKeeperDatabase
+): Promise<BackupData> {
+  return database.transaction('r', database.tables, () =>
+    readAllTablesInCurrentTransaction(database)
+  )
 }
 
 function tableCounts(data: BackupData): BackupTableCounts {
@@ -126,6 +132,13 @@ export async function exportDatabaseBackup(
   options: ExportBackupOptions = {}
 ): Promise<BackupEnvelope> {
   const data = await readAllTables(database)
+  return createBackupFromData(data, options)
+}
+
+async function createBackupFromData(
+  data: BackupData,
+  options: ExportBackupOptions = {}
+): Promise<BackupEnvelope> {
   const unsigned: BackupUnsignedEnvelope = {
     format: BACKUP_FORMAT,
     backupFormatVersion: BACKUP_FORMAT_VERSION,
@@ -213,7 +226,7 @@ async function replaceAllTables(
   database: MouseKeeperDatabase,
   data: BackupData,
   failBeforeTable: BackupTableName | undefined
-): Promise<void> {
+): Promise<BackupData> {
   assertRequiredDatabaseTables(database)
 
   const clearers: Record<BackupTableName, () => Promise<unknown>> = {
@@ -257,7 +270,9 @@ async function replaceAllTables(
       database.backupMetadata.bulkAdd(data.backupMetadata)
   }
 
-  await database.transaction('rw', database.tables, async () => {
+  return database.transaction('rw', database.tables, async () => {
+    const previousData =
+      await readAllTablesInCurrentTransaction(database)
     for (const table of BACKUP_TABLE_NAMES) {
       await clearers[table]()
     }
@@ -267,6 +282,7 @@ async function replaceAllTables(
       }
       await writers[table]()
     }
+    return previousData
   })
 }
 
@@ -277,18 +293,18 @@ export async function restoreDatabaseBackup(
 ): Promise<RestoreResult> {
   const validated = await parseAndValidateBackup(input, options)
 
-  // This complete safety copy remains in memory and is returned to the caller.
-  // The UI can require the user to download it before invoking restore.
-  const preRestoreBackup = await exportDatabaseBackup(database, {
-    backupId: options.preRestoreBackupId,
-    exportedAt: options.preRestoreExportedAt
-  })
-
-  await replaceAllTables(
+  // Read the exact pre-restore state inside the same all-table write
+  // transaction that performs replacement. This closes the cross-tab window
+  // where a concurrent commit could otherwise be absent from the safety copy.
+  const preRestoreData = await replaceAllTables(
     database,
     validated.backup.data,
     options.testOnlyFailBeforeTable
   )
+  const preRestoreBackup = await createBackupFromData(preRestoreData, {
+    backupId: options.preRestoreBackupId,
+    exportedAt: options.preRestoreExportedAt
+  })
 
   return {
     restoredBackupId: validated.backup.backupId,

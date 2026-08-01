@@ -1,7 +1,19 @@
-import { activityLogSchema, type EntityType } from '../domain'
+import {
+  activityLogSchema,
+  MANUAL_MOUSE_EVENT_TYPES,
+  type EntityType
+} from '../domain'
 import type { MouseKeeperDatabase } from '../db'
 
-export type PurgeEntityType = 'mouse' | 'cage' | 'experiment' | 'task' | 'tag'
+export type PurgeEntityType =
+  | 'mouse'
+  | 'cage'
+  | 'experiment'
+  | 'task'
+  | 'tag'
+  | 'mouseEvent'
+
+const MANUAL_EVENT_TYPES = new Set<string>(MANUAL_MOUSE_EVENT_TYPES)
 
 export interface PurgePreview {
   entityType: PurgeEntityType
@@ -152,6 +164,36 @@ export async function createPurgePreview(
     }
   }
 
+  if (entityType === 'mouseEvent') {
+    const event = await database.mouseEvents.get(entityId)
+    if (!event || event.deletedFlag !== 1) {
+      throw new Error('只能永久删除回收站中的事件')
+    }
+    const weights = await database.weightRecords
+      .where('eventId')
+      .equals(entityId)
+      .toArray()
+    const blockers = [
+      event.eventType !== 'weight' &&
+        !MANUAL_EVENT_TYPES.has(event.eventType) &&
+        '系统业务事件必须随业务历史保留',
+      event.eventType === 'weight' &&
+        (weights.length !== 1 || weights[0]?.deletedFlag !== 1) &&
+        '体重事件缺少配对的已删除体重记录'
+    ].filter((item): item is string => Boolean(item))
+    return {
+      entityType,
+      entityId,
+      label: event.title,
+      canPurge: blockers.length === 0,
+      blockers,
+      deleteCounts: {
+        mouseEvents: 1,
+        weightRecords: weights.length
+      }
+    }
+  }
+
   const tag = await database.tags.get(entityId)
   if (!tag || tag.deletedFlag !== 1) {
     throw new Error('只能永久删除回收站中的标签')
@@ -245,6 +287,12 @@ export async function purgeDeletedEntity(
       await database.experiments.delete(latest.entityId)
     } else if (latest.entityType === 'task') {
       await database.tasks.delete(latest.entityId)
+    } else if (latest.entityType === 'mouseEvent') {
+      await database.weightRecords
+        .where('eventId')
+        .equals(latest.entityId)
+        .delete()
+      await database.mouseEvents.delete(latest.entityId)
     } else {
       await database.tags.delete(latest.entityId)
     }
