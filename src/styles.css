@@ -4936,6 +4936,13 @@ kbd {
   font-size: 16px;
 }
 
+.agent-settings__panel-heading p,
+.agent-settings__advanced-intro {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .agent-settings__panel-heading > div {
   display: flex;
   gap: 4px;
@@ -4992,6 +4999,60 @@ kbd {
 
 .agent-settings__advanced[open] > summary {
   margin-bottom: 12px;
+}
+
+.agent-settings__panel--primary {
+  width: min(100%, 760px);
+  padding: clamp(16px, 3vw, 24px);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border-default));
+  background: color-mix(in srgb, var(--accent-soft) 32%, var(--bg-surface));
+}
+
+.agent-settings__panel--primary .agent-settings__panel-heading > div {
+  flex-direction: column;
+  gap: 0;
+}
+
+.agent-settings__status {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.agent-settings__status.is-ok {
+  border-color: var(--positive-border);
+  background: var(--positive-bg);
+  color: var(--positive-fg);
+}
+
+.agent-settings__status.is-error {
+  border-color: var(--critical-border);
+  background: var(--critical-bg);
+  color: var(--critical-fg);
+}
+
+.agent-settings__advanced--all {
+  padding: 14px;
+}
+
+.agent-settings__advanced--all > summary {
+  color: var(--text-default);
+  font-size: 12px;
+}
+
+.agent-settings__advanced--all > .agent-settings__columns {
+  margin-top: 14px;
+}
+
+.agent-settings__transfer {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-default);
 }
 
 .agent-settings__toggles {

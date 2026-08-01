@@ -140,7 +140,7 @@ test('global search restores focus to its trigger when dismissed', async ({
   await expect(trigger).toBeFocused()
 })
 
-test('Agent workspace preserves page context and exposes complete model settings', async ({
+test('Agent workspace preserves page context and keeps advanced model settings available', async ({
   page
 }) => {
   await page.goto('/mice')
@@ -157,15 +157,21 @@ test('Agent workspace preserves page context and exposes complete model settings
   await page.getByRole('link', { name: '模型设置' }).click()
   await expect(page).toHaveURL('/settings')
   await expect(page.getByRole('heading', { name: 'Agent 服务与模型' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '常用设置' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: '模型', exact: true })).toHaveValue('gpt-5.6-sol')
+  await expect(page.getByLabel('服务地址')).toBeVisible()
+  await page.getByRole('combobox', { name: '服务', exact: true }).click()
+  await page.getByRole('option', { name: '本地 OpenAI 兼容服务', exact: true }).click()
+  await page.reload()
+  await expect(page.getByRole('combobox', { name: '服务', exact: true })).toContainText('本地 OpenAI 兼容服务')
+  await page.getByText('高级设置与配置管理', { exact: true }).click()
   await expect(page.getByText('浏览器密钥边界')).toBeVisible()
   await expect(page.getByLabel('API 协议')).toBeVisible()
-  await expect(page.getByLabel('模型名称')).toHaveValue('gpt-5.6-sol')
   await expect(page.getByLabel('本地上下文超限策略')).toBeVisible()
-  await page.getByText('Provider 高级设置', { exact: true }).click()
   await page.getByLabel('流式响应格式').click()
   await page.getByRole('option', { name: 'JSONL', exact: true }).click()
   await page.reload()
-  await page.getByText('Provider 高级设置', { exact: true }).click()
+  await page.getByText('高级设置与配置管理', { exact: true }).click()
   await expect(page.getByLabel('流式响应格式')).toContainText('JSONL')
   await expectNoHorizontalOverflow(page)
 })
