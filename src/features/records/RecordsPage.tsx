@@ -19,26 +19,79 @@ import { EVENT_TYPE_LABELS } from '../../lib/labels'
 type RecordsTab = 'events' | 'weights' | 'activity'
 
 export function RecordsPage() {
+  const searchParams = new URLSearchParams(window.location.search)
+  const mouseFilter = searchParams.get('mouse') ?? ''
   const data = useLiveQuery(async () => {
+    const eventsQuery = mouseFilter
+      ? db.mouseEvents
+          .where('mouseId')
+          .equals(mouseFilter)
+          .filter((event) => event.deletedFlag === 0)
+          .toArray()
+          .then((events) =>
+            events
+              .toSorted((left, right) =>
+                right.occurredAt.localeCompare(left.occurredAt)
+              )
+              .slice(0, 100)
+          )
+      : db.mouseEvents
+          .orderBy('occurredAt')
+          .reverse()
+          .filter((event) => event.deletedFlag === 0)
+          .limit(100)
+          .toArray()
+    const weightsQuery = mouseFilter
+      ? db.weightRecords
+          .where('mouseId')
+          .equals(mouseFilter)
+          .filter((weight) => weight.deletedFlag === 0)
+          .toArray()
+          .then((weights) =>
+            weights
+              .toSorted((left, right) =>
+                right.measuredAt.localeCompare(left.measuredAt)
+              )
+              .slice(0, 100)
+          )
+      : db.weightRecords
+          .orderBy('measuredAt')
+          .reverse()
+          .filter((weight) => weight.deletedFlag === 0)
+          .limit(100)
+          .toArray()
+    const activitiesQuery = mouseFilter
+      ? Promise.all([
+          db.activityLogs
+            .where('primaryEntityKey')
+            .equals(`mouse:${mouseFilter}`)
+            .toArray(),
+          db.activityLogs
+            .where('entityRefKeys')
+            .equals(`mouse:${mouseFilter}`)
+            .toArray()
+        ]).then((activityGroups) =>
+            [...new Map(
+              activityGroups
+                .flat()
+                .filter((activity) => activity.deletedFlag === 0)
+                .map((activity) => [activity.id, activity])
+            ).values()]
+              .toSorted((left, right) =>
+                right.occurredAt.localeCompare(left.occurredAt)
+              )
+              .slice(0, 100)
+          )
+      : db.activityLogs
+          .orderBy('occurredAt')
+          .reverse()
+          .filter((activity) => activity.deletedFlag === 0)
+          .limit(100)
+          .toArray()
     const [events, weights, activities, mice] = await Promise.all([
-      db.mouseEvents
-        .orderBy('occurredAt')
-        .reverse()
-        .filter((event) => event.deletedFlag === 0)
-        .limit(100)
-        .toArray(),
-      db.weightRecords
-        .orderBy('measuredAt')
-        .reverse()
-        .filter((weight) => weight.deletedFlag === 0)
-        .limit(100)
-        .toArray(),
-      db.activityLogs
-        .orderBy('occurredAt')
-        .reverse()
-        .filter((activity) => activity.deletedFlag === 0)
-        .limit(100)
-        .toArray(),
+      eventsQuery,
+      weightsQuery,
+      activitiesQuery,
       db.mice.toArray()
     ])
     return {
@@ -47,11 +100,9 @@ export function RecordsPage() {
       activities,
       mouseById: new Map(mice.map((mouse) => [mouse.id, mouse]))
     }
-  }, [])
+  }, [mouseFilter])
   const [tab, setTab] = useState<RecordsTab>('events')
   const [query, setQuery] = useState('')
-  const searchParams = new URLSearchParams(window.location.search)
-  const mouseFilter = searchParams.get('mouse') ?? ''
   const normalizedQuery = normalizeText(query)
   const filteredEvents = useMemo(
     () =>
