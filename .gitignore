@@ -31,6 +31,14 @@ local-data/
 user-data/
 *.mousekeeper-backup.json
 *.mousekeeper-export.csv
+mousekeeper-backup-*.json
+mousekeeper-before-restore-*.json
+mousekeeper-exact-before-restore-*.json
+mousekeeper-mice-*.csv
+mousekeeper-cages-*.csv
+mousekeeper-experiments-*.csv
+mousekeeper-weights-*.csv
+mousekeeper-events-*.csv
 
 # Editors and operating systems
 .DS_Store
