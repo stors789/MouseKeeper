@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Check,
@@ -51,6 +51,8 @@ function taskTone(task: Task) {
 
 export function TasksPage() {
   const { showToast } = useToast()
+  const focusTaskId =
+    new URLSearchParams(window.location.search).get('focus') ?? ''
   const tasks = useLiveQuery(
     () =>
       db.tasks
@@ -110,7 +112,7 @@ export function TasksPage() {
           if (
             dueScope === 'upcoming' &&
             (task.status !== 'pending' ||
-              task.dueDate < today ||
+              task.dueDate <= today ||
               task.dueDate > upcomingBoundary)
           ) {
             return false
@@ -136,6 +138,18 @@ export function TasksPage() {
     },
     [dueScope, relatedKey, status, tasks]
   )
+
+  useEffect(() => {
+    if (!focusTaskId || !visible.some((task) => task.id === focusTaskId)) {
+      return undefined
+    }
+    const frame = requestAnimationFrame(() => {
+      const task = document.getElementById(`task-${focusTaskId}`)
+      task?.scrollIntoView({ block: 'center' })
+      task?.focus({ preventScroll: true })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [focusTaskId, visible])
 
   const setTaskStatus = async (task: Task, nextStatus: TaskStatus) => {
     setBusy(task.id)
@@ -298,7 +312,12 @@ export function TasksPage() {
           {visible.map((task) => {
             const tone = taskTone(task)
             return (
-              <li key={task.id}>
+              <li
+                data-focused={task.id === focusTaskId || undefined}
+                id={`task-${task.id}`}
+                key={task.id}
+                tabIndex={task.id === focusTaskId ? -1 : undefined}
+              >
                 <span className="task-list__rail" data-tone={tone} />
                 <div>
                   <strong>{task.title}</strong>

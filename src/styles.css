@@ -4500,6 +4500,12 @@ kbd {
   padding: 8px 12px 8px 0;
 }
 
+.task-list > li[data-focused] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  background: var(--accent-soft);
+}
+
 .task-list strong,
 .timeline-list strong,
 .detail-title-row,
