@@ -1,4 +1,5 @@
 import { FileBroker } from '../files'
+import { exportDatabaseBackup, serializeBackup } from '../../backup'
 import { createMouseKeeperDatabase, type MouseKeeperDatabase } from '../../db'
 import { MouseKeeperService } from '../../services'
 import { EXTENDED_CAPABILITY_DESCRIPTORS, APPLICATION_EVENT_NAMES, createApplicationCapabilityRegistry } from './extended-handlers'
@@ -57,7 +58,7 @@ describe('extended application capabilities', () => {
     globalThis.removeEventListener(APPLICATION_EVENT_NAMES.setTheme, listener)
   })
 
-  it('prepares a browser file request and continues CSV import after selection', async () => {
+  it('keeps CSV preview read-only and commits only its one-time token', async () => {
     const request = await registry.execute('data.file.request', { kind: 'csv-import' }, context('request-file'))
     expect(request).toMatchObject({ status: 'needs-user-action' })
     const requestId = request.artifacts![0]!.id
@@ -65,13 +66,61 @@ describe('extended application capabilities', () => {
       requestId,
       new File(['耳标号,品系,性别\nAGENT-CSV,C57BL/6J,雌'], 'agent.csv', { type: 'text/csv' })
     )
-    const imported = await registry.execute(
-      'data.csv.import',
+    const preview = await registry.execute(
+      'data.csv.preview',
       { fileRequestId: requestId },
-      context('import-file')
+      context('preview-file')
+    )
+    expect(preview).toMatchObject({ status: 'prepared', modifiesData: false })
+    expect(preview.summary).toContain('尚未写入')
+    expect(await database.mice.count()).toBe(0)
+    const previewToken = (preview.data as { previewToken: string }).previewToken
+    const imported = await registry.execute(
+      'data.csv.import', { previewToken }, context('import-file')
     )
     expect(imported.summary).toContain('成功 1')
     expect(await database.mice.where('normalizedEarTag').equals('agent-csv').count()).toBe(1)
+    await expect(registry.execute(
+      'data.csv.import', { previewToken }, context('reused-import')
+    )).rejects.toThrow('未消费')
+  })
+
+  it('keeps backup preview read-only and commits only the same previewed file', async () => {
+    const source = createMouseKeeperDatabase(`extended-source-${crypto.randomUUID()}`)
+    await source.open()
+    try {
+      const sourceService = new MouseKeeperService(source)
+      await sourceService.createMouse({ operationId: crypto.randomUUID(), earTag: 'FROM-BACKUP', strain: 'BALB/c', sex: 'male' })
+      await new MouseKeeperService(database).createMouse({ operationId: crypto.randomUUID(), earTag: 'BEFORE-RESTORE', strain: 'C57BL/6J', sex: 'female' })
+      const serialized = serializeBackup(await exportDatabaseBackup(source))
+      const request = await registry.execute('data.file.request', { kind: 'backup-restore' }, context('request-backup'))
+      const requestId = request.artifacts![0]!.id
+      files.provide(requestId, new File([serialized], 'backup.json', { type: 'application/json' }))
+
+      const preview = await registry.execute('data.backup.preview', { fileRequestId: requestId }, context('preview-backup'))
+      expect(preview).toMatchObject({ status: 'prepared', modifiesData: false })
+      expect((await database.mice.toArray()).map((mouse) => mouse.earTag)).toContain('BEFORE-RESTORE')
+      const previewToken = (preview.data as { previewToken: string }).previewToken
+
+      const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test')
+      const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+      await registry.execute('data.backup.restore', { previewToken }, context('commit-backup'))
+      createObjectURL.mockRestore()
+      revokeObjectURL.mockRestore()
+      expect((await database.mice.toArray()).map((mouse) => mouse.earTag)).toEqual(['FROM-BACKUP'])
+      await expect(registry.execute('data.backup.restore', { previewToken }, context('reused-backup'))).rejects.toThrow('未消费')
+    } finally {
+      source.close()
+      await source.delete()
+    }
+  })
+
+  it('rejects unknown CSV mapping keys before reading or writing the file', async () => {
+    await expect(registry.execute(
+      'data.csv.preview',
+      { fileRequestId: 'missing', mapping: { inventedField: '表头' } },
+      context('invalid-mapping')
+    )).rejects.toThrow('$.mapping.inventedField')
   })
 
   it('previews and executes permanent deletion through the same registry', async () => {

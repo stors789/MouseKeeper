@@ -202,15 +202,16 @@ export function AgentPage() {
     }
   }
 
-  const chooseFile = async (event: ChangeEvent<HTMLInputElement>, requestId: string) => {
+  const chooseFile = async (event: ChangeEvent<HTMLInputElement>, requestId: string, originalPrompt: string) => {
     const file = event.target.files?.[0]
     if (!file) return
     setFileBusy(requestId)
     setError(undefined)
     try {
       const request = fileBroker.provide(requestId, file)
-      const capability = request.kind === 'backup-restore' ? 'data.backup.restore' : 'data.csv.import'
-      await execute(`我已通过用户手势选择文件“${file.name}”。继续上一项文件工作流：调用 ${capability}，fileRequestId 为 ${requestId}。完成后报告逐项结果。`)
+      const previewCapability = request.kind === 'backup-restore' ? 'data.backup.preview' : 'data.csv.preview'
+      const commitCapability = request.kind === 'backup-restore' ? 'data.backup.restore' : 'data.csv.import'
+      await execute(`原始指令是：“${originalPrompt}”。我已通过用户手势选择文件“${file.name}”。必须先调用 ${previewCapability}，fileRequestId 为 ${requestId}。预览通过后：若原始指令明确要求执行恢复或导入，立即用预览结果的 previewToken 调用 ${commitCapability}；若原始指令只要求选择、检查或预览，则显示预览后停止。`)
     } catch (fileError) {
       setError(readableError(fileError))
     } finally {
@@ -315,6 +316,7 @@ export function AgentPage() {
                 const hasChanges = commandHasChanges(commandRun)
                 const canUndo = commandCanUndo(commandRun)
                 const fileRequests = result?.results.flatMap((item) => item.artifacts ?? []).filter((artifact) => artifact.kind === 'file-request') ?? []
+                const filePreviews = result?.results.filter((item) => item.capabilityId === 'data.backup.preview' || item.capabilityId === 'data.csv.preview') ?? []
                 const openTargets = result?.results.flatMap((item) => item.open ? [item.open] : []) ?? []
                 return (
                   <article className="agent-run-card" data-status={commandRun.status} key={commandRun.id}>
@@ -333,8 +335,15 @@ export function AgentPage() {
 
                     {fileRequests.map((artifact) => {
                       const request = fileBroker.getRequest(artifact.id)
-                      return request?.status === 'waiting' ? <label className="agent-file-request" key={artifact.id}><FileUp aria-hidden="true" size={18} /><span><strong>{artifact.name}</strong><small>选择后自动继续这一工作流</small></span><span className="ui-button ui-button--primary ui-button--small">{fileBusy === artifact.id ? '处理中…' : '选择文件'}</span><input className="sr-only" disabled={busy || Boolean(fileBusy)} type="file" accept={request.accept} onChange={(event) => void chooseFile(event, artifact.id)} /></label> : null
+                      return request?.status === 'waiting' ? <label className="agent-file-request" key={artifact.id}><FileUp aria-hidden="true" size={18} /><span><strong>{artifact.name}</strong><small>选择后自动继续预览，并按原始指令决定是否提交</small></span><span className="ui-button ui-button--primary ui-button--small">{fileBusy === artifact.id ? '处理中…' : '选择文件'}</span><input className="sr-only" disabled={busy || Boolean(fileBusy)} type="file" accept={request.accept} onChange={(event) => void chooseFile(event, artifact.id, commandRun.prompt)} /></label> : null
                     })}
+
+                    {filePreviews.map((preview) => (
+                      <details className="agent-file-preview" key={`${preview.capabilityId}:${commandRun.id}`}>
+                        <summary>查看文件预览详情</summary>
+                        <pre>{JSON.stringify(preview.data, null, 2)}</pre>
+                      </details>
+                    ))}
 
                     <footer>
                       <span>{commandRun.status === 'failed' && hasChanges ? '执行失败，但已记录可撤回变化' : recoveryLabel(commandRun)} · {commandRun.changes.length + commandRun.preferenceChanges.length} 项变化</span>

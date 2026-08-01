@@ -3,7 +3,7 @@ import { scanIntegrity, type MouseKeeperDatabase } from '../../db'
 import { MOUSE_SEXES, MOUSE_STATUSES, normalizeText } from '../../domain'
 import { createCsvBlob, parseCsvPreview } from '../../import-export/csv'
 import { commitMouseImport } from '../../import-export/mouse-import-runner'
-import { suggestMouseFieldMapping, validateMouseImport, type MouseFieldMapping } from '../../import-export/mouse-import'
+import { MOUSE_IMPORT_FIELDS, suggestMouseFieldMapping, validateMouseImport, type MouseFieldMapping } from '../../import-export/mouse-import'
 import { downloadBlob } from '../../lib/download'
 import { createPurgePreview, purgeDeletedEntity, type MouseKeeperService, type PurgeEntityType } from '../../services'
 import { buildCsvExport, type CsvExportKind } from '../data'
@@ -52,6 +52,9 @@ const tasksViewState = objectSchema({
   relatedKey: stringSchema('all 或 mouse:<id>、cage:<id>、experiment:<id>')
 })
 const dataViewState = objectSchema({ tab: enumSchema(['backup', 'import', 'export', 'recycle', 'sample']) })
+const mouseFieldMappingSchema = objectSchema(
+  Object.fromEntries(MOUSE_IMPORT_FIELDS.map((field) => [field, stringSchema('必须精确匹配 CSV 表头')]))
+)
 
 const viewConfigureSchema = {
   type: 'object',
@@ -132,12 +135,20 @@ export const EXTENDED_CAPABILITY_DESCRIPTORS: readonly CapabilityDescriptor[] = 
     kind: 'file', inputSchema: objectSchema({ kind: enumSchema(['backup-restore', 'csv-import']) }, ['kind']), outputDescription: '文件请求及 accept 类型', reads: [], writes: ['ephemeral file broker'], modifiesData: false, supportsBatch: false, risk: 'view-only', recovery: 'none', requiresUserGesture: true, service: 'FileBroker'
   }),
   descriptor({
-    id: 'data.backup.restore', domain: 'data', name: '恢复完整备份', description: '使用已由用户选择的 JSON fileRequestId 完成预检、全库恢复和恢复前安全副本下载。',
-    kind: 'file', inputSchema: objectSchema({ fileRequestId: stringSchema() }, ['fileRequestId']), outputDescription: '恢复摘要和安全备份', reads: ['selected File', 'all business tables'], writes: ['all business tables'], modifiesData: true, supportsBatch: true, risk: 'high-impact', recovery: 'full-backup', service: 'restoreDatabaseBackup'
+    id: 'data.backup.preview', domain: 'data', name: '预览完整备份恢复', description: '只读验证用户选择的 JSON 备份并显示替换影响。不写入数据库；如果原始指令明确要求恢复，可用返回的一次性 previewToken 继续提交。',
+    kind: 'file', inputSchema: objectSchema({ fileRequestId: stringSchema() }, ['fileRequestId']), outputDescription: '备份摘要、问题和一次性 previewToken', reads: ['selected File'], writes: ['ephemeral file broker'], modifiesData: false, supportsBatch: true, risk: 'read-only', recovery: 'none', service: 'createRestorePreview'
   }),
   descriptor({
-    id: 'data.csv.import', domain: 'data', name: '导入小鼠 CSV', description: '使用已由用户选择的 CSV fileRequestId，自动建议或使用给定映射，校验并逐行提交合法记录。',
-    kind: 'file', inputSchema: objectSchema({ fileRequestId: stringSchema(), mapping: objectSchema({}, [], undefined, true) }, ['fileRequestId']), outputDescription: '逐行导入报告', reads: ['selected File', 'mice', 'cages', 'tags'], writes: ['mice', 'tags', 'cageAssignments', 'mouseEvents', 'activityLogs'], modifiesData: true, supportsBatch: true, risk: 'high-impact', recovery: 'full-backup', service: 'commitMouseImport'
+    id: 'data.backup.restore', domain: 'data', name: '提交完整备份恢复', description: '仅接受同一用户选择文件的已预览一次性 previewToken，重新验证后全库替换并下载恢复前安全副本。',
+    kind: 'file', inputSchema: objectSchema({ previewToken: stringSchema() }, ['previewToken']), outputDescription: '恢复摘要和安全备份', reads: ['previewed selected File', 'all business tables'], writes: ['all business tables'], modifiesData: true, supportsBatch: true, risk: 'high-impact', recovery: 'full-backup', service: 'restoreDatabaseBackup'
+  }),
+  descriptor({
+    id: 'data.csv.preview', domain: 'data', name: '预览小鼠 CSV 导入', description: '只读解析、映射并校验用户选择的 CSV。不写入数据库；映射会固化在一次性 previewToken 中，如果原始指令明确要求导入则可继续提交。',
+    kind: 'file', inputSchema: objectSchema({ fileRequestId: stringSchema(), mapping: mouseFieldMappingSchema }, ['fileRequestId']), outputDescription: '表头、映射、合法/非法/警告行数与一次性 previewToken', reads: ['selected File', 'mice'], writes: ['ephemeral file broker'], modifiesData: false, supportsBatch: true, risk: 'read-only', recovery: 'none', service: 'parseCsvPreview + validateMouseImport'
+  }),
+  descriptor({
+    id: 'data.csv.import', domain: 'data', name: '提交小鼠 CSV 导入', description: '仅接受同一用户选择文件的已预览一次性 previewToken；使用预览时固化的映射重新校验并提交合法记录。',
+    kind: 'file', inputSchema: objectSchema({ previewToken: stringSchema() }, ['previewToken']), outputDescription: '逐行导入报告', reads: ['previewed selected File', 'mice', 'cages', 'tags'], writes: ['mice', 'tags', 'cageAssignments', 'mouseEvents', 'activityLogs'], modifiesData: true, supportsBatch: true, risk: 'high-impact', recovery: 'full-backup', service: 'commitMouseImport'
   }),
   descriptor({
     id: 'data.purge.preview', domain: 'data', name: '预览永久删除影响', description: '检查回收站实体的引用阻塞和将删除的记录数。',
@@ -231,18 +242,33 @@ export function registerExtendedCapabilities(
           const request = files.request(String(input.kind) as FileWorkflowKind)
           return { status: 'needs-user-action', capabilityId: item.id, summary: request.kind === 'backup-restore' ? '请选择 MouseKeeper JSON 备份文件' : '请选择小鼠 CSV 文件', data: request, affected: [], artifacts: [{ id: request.id, name: request.kind === 'backup-restore' ? '选择 JSON 备份' : '选择 CSV 文件', mediaType: request.accept, size: 0, kind: 'file-request' }], warnings: ['浏览器要求用户点击文件选择按钮'], modifiesData: false }
         }
-        if (item.id === 'data.backup.restore') {
-          const file = files.consume(String(input.fileRequestId), 'backup-restore')
+        if (item.id === 'data.backup.preview') {
+          const requestId = String(input.fileRequestId)
+          const file = files.preview(requestId, 'backup-restore')
           const preview = await createRestorePreview(file)
           if (!preview.canRestore) throw new Error(`备份预检失败：${preview.issues.map((issue) => issue.message).join('；')}`)
+          const authorization = files.authorizePreview(requestId, 'backup-restore')
+          return {
+            status: 'prepared', capabilityId: item.id,
+            summary: `备份预览完成：将用 ${preview.summary?.totalRecords ?? 0} 条备份记录替换当前数据库，尚未写入`,
+            data: { previewToken: authorization.id, summary: preview.summary, issues: preview.issues },
+            affected: [],
+            warnings: ['预览不会修改数据；仅原始指令明确要求恢复时才应继续提交'], modifiesData: false
+          }
+        }
+        if (item.id === 'data.backup.restore') {
+          const { file } = files.consumeAuthorized(String(input.previewToken), 'backup-restore')
+          const preview = await createRestorePreview(file)
+          if (!preview.canRestore) throw new Error(`备份重新验证失败：${preview.issues.map((issue) => issue.message).join('；')}`)
           const restored = await restoreDatabaseBackup(database, file)
           const safetyBlob = backupBlob(restored.preRestoreBackup)
           const name = timestampFilename('mousekeeper-exact-before-agent-restore', 'json')
           downloadBlob(safetyBlob, name)
           return { status: 'succeeded', capabilityId: item.id, summary: `已恢复 ${preview.summary?.totalRecords ?? 0} 条记录，并下载恢复前安全副本`, data: { preview: preview.summary, safetyFileName: name }, affected: [], artifacts: [{ id: crypto.randomUUID(), name, mediaType: safetyBlob.type, size: safetyBlob.size, kind: 'download' }], warnings: [], modifiesData: true }
         }
-        if (item.id === 'data.csv.import') {
-          const file = files.consume(String(input.fileRequestId), 'csv-import')
+        if (item.id === 'data.csv.preview') {
+          const requestId = String(input.fileRequestId)
+          const file = files.preview(requestId, 'csv-import')
           if (file.size > 20 * 1024 * 1024) throw new Error('CSV 文件超过 20 MB，请拆分后导入')
           const csv = parseCsvPreview(await file.text())
           const mapping = input.mapping && typeof input.mapping === 'object' && Object.keys(input.mapping).length > 0
@@ -254,6 +280,28 @@ export function registerExtendedCapabilities(
             existingEarTags: new Set(mice.flatMap((mouse) => mouse.deletedFlag === 0 && mouse.earTag ? [normalizeText(mouse.earTag)] : []))
           })
           if (preview.validCount === 0) throw new Error('CSV 没有可导入的合法行')
+          const authorization = files.authorizePreview(requestId, 'csv-import', { mapping })
+          return {
+            status: 'prepared', capabilityId: item.id,
+            summary: `CSV 预览完成：合法 ${preview.validCount}、非法 ${preview.invalidCount}、警告 ${preview.warningCount}，尚未写入`,
+            data: { previewToken: authorization.id, headers: csv.headers, mapping, validCount: preview.validCount, invalidCount: preview.invalidCount, warningCount: preview.warningCount, rows: preview.rows.slice(0, 20) },
+            affected: [],
+            warnings: [...(preview.invalidCount > 0 ? [`${preview.invalidCount} 行不合法，提交时会跳过`] : []), '预览不会修改数据；仅原始指令明确要求导入时才应继续提交'],
+            modifiesData: false
+          }
+        }
+        if (item.id === 'data.csv.import') {
+          const { file, metadata } = files.consumeAuthorized(String(input.previewToken), 'csv-import')
+          if (file.size > 20 * 1024 * 1024) throw new Error('CSV 文件超过 20 MB，请拆分后导入')
+          const csv = parseCsvPreview(await file.text())
+          const mapping = metadata.mapping as MouseFieldMapping
+          if (!mapping || typeof mapping !== 'object') throw new Error('CSV 预览映射已失效')
+          const mice = await database.mice.toArray()
+          const preview = validateMouseImport(csv, mapping, {
+            existingIds: new Set(mice.map((mouse) => normalizeText(mouse.id))),
+            existingEarTags: new Set(mice.flatMap((mouse) => mouse.deletedFlag === 0 && mouse.earTag ? [normalizeText(mouse.earTag)] : []))
+          })
+          if (preview.validCount === 0) throw new Error('CSV 在提交前重新校验后没有可导入的合法行')
           const report = await commitMouseImport(database, service, preview)
           return { status: 'succeeded', capabilityId: item.id, summary: `CSV 导入完成：成功 ${report.importedCount}、跳过 ${report.skippedCount}、失败 ${report.failedCount}`, data: report, affected: report.rows.flatMap((row) => row.mouseId ? [{ type: 'mouse', id: row.mouseId, href: `/mice/${row.mouseId}` }] : []), warnings: report.failedCount > 0 ? ['部分 CSV 行导入失败，详情见结果'] : [], modifiesData: true }
         }

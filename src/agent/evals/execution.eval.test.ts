@@ -1,4 +1,5 @@
-import { createApplicationCapabilityRegistry } from '../../application'
+import { createApplicationCapabilityRegistry, FileBroker, type CapabilityExecutionContext } from '../../application'
+import { exportDatabaseBackup, serializeBackup } from '../../backup'
 import { createMouseKeeperDatabase, type MouseKeeperDatabase } from '../../db'
 import { MouseKeeperService } from '../../services'
 import { AgentOrchestrator, type AgentRunInput } from '../orchestrator'
@@ -44,10 +45,18 @@ describe('offline Agent execution evals with production registry and databases',
     }
   }
 
-  function harness(transcript: readonly TranscriptStep[]) {
+  function capabilityContext(label: string): CapabilityExecutionContext {
+    return { actor: 'llm', commandRunId: `prepare-${label}`, operationId: `prepare-${label}-${crypto.randomUUID()}` }
+  }
+
+  function harness(transcript: readonly TranscriptStep[], files?: FileBroker) {
     const model = new DeterministicTranscriptModel(transcript)
-    const registry = createApplicationCapabilityRegistry(business, new MouseKeeperService(business))
-    return { model, orchestrator: new AgentOrchestrator(registry, model, recovery) }
+    const registry = createApplicationCapabilityRegistry(
+      business,
+      new MouseKeeperService(business),
+      files ? { fileBroker: files } : undefined
+    )
+    return { model, registry, orchestrator: new AgentOrchestrator(registry, model, recovery) }
   }
 
   it('executes a real create, records exact trace/data diff, and precisely undoes it', async () => {
@@ -123,5 +132,88 @@ describe('offline Agent execution evals with production registry and databases',
     expect(result.commandRun.traces.map((trace) => trace.status)).toEqual(['failed', 'succeeded'])
     expect(result.commandRun.capabilityIds).toEqual(['cage.create'])
     expect((await business.cages.toArray()).filter((cage) => cage.cageNumber === 'EVAL-CORRECTED')).toHaveLength(1)
+  })
+
+  it('executes and undoes a previewed CSV import while preview remains read-only', async () => {
+    const files = new FileBroker()
+    const request = files.request('csv-import')
+    files.provide(request.id, new File(['耳标号,品系,性别\nUNDO-CSV,C57BL/6J,雌'], 'undo.csv', { type: 'text/csv' }))
+    const { registry } = harness([], files)
+    const preview = await registry.execute('data.csv.preview', { fileRequestId: request.id }, capabilityContext('csv'))
+    expect(await business.mice.count()).toBe(0)
+    const previewToken = (preview.data as { previewToken: string }).previewToken
+    const committed = new AgentOrchestrator(registry, new DeterministicTranscriptModel([
+      { text: '', calls: [toolCall('commit-csv', 'data.csv.import', { previewToken })] },
+      { text: 'CSV 已提交。' }
+    ]), recovery)
+    const result = await committed.run(input('确认导入预览的 CSV'))
+    expect(result.status).toBe('succeeded')
+    expect(result.commandRun.recoveryKind).toBe('full-backup')
+    expect(await business.mice.where('normalizedEarTag').equals('undo-csv').count()).toBe(1)
+    await recovery.undo(result.commandRunId)
+    expect(await business.mice.count()).toBe(0)
+  })
+
+  it('executes and undoes a previewed full backup replacement', async () => {
+    const source = createMouseKeeperDatabase(`eval-restore-source-${crypto.randomUUID()}`)
+    await source.open()
+    try {
+      await new MouseKeeperService(source).createMouse({ operationId: crypto.randomUUID(), earTag: 'RESTORED', strain: 'BALB/c', sex: 'male' })
+      await new MouseKeeperService(business).createMouse({ operationId: crypto.randomUUID(), earTag: 'ORIGINAL', strain: 'C57BL/6J', sex: 'female' })
+      const files = new FileBroker()
+      const request = files.request('backup-restore')
+      files.provide(request.id, new File([serializeBackup(await exportDatabaseBackup(source))], 'restore.json', { type: 'application/json' }))
+      const { registry } = harness([], files)
+      const preview = await registry.execute('data.backup.preview', { fileRequestId: request.id }, capabilityContext('restore'))
+      expect((await business.mice.toArray()).map((mouse) => mouse.earTag)).toContain('ORIGINAL')
+      const previewToken = (preview.data as { previewToken: string }).previewToken
+      const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:eval-restore')
+      const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+      const committed = new AgentOrchestrator(registry, new DeterministicTranscriptModel([
+        { text: '', calls: [toolCall('commit-restore', 'data.backup.restore', { previewToken })] },
+        { text: '备份已恢复。' }
+      ]), recovery)
+      const result = await committed.run(input('确认恢复预览的备份', '/data'))
+      createObjectURL.mockRestore()
+      revokeObjectURL.mockRestore()
+      expect(result.status).toBe('succeeded')
+      expect(result.commandRun.recoveryKind).toBe('full-backup')
+      expect((await business.mice.toArray()).map((mouse) => mouse.earTag)).toEqual(['RESTORED'])
+      await recovery.undo(result.commandRunId)
+      expect((await business.mice.toArray()).map((mouse) => mouse.earTag)).toEqual(['ORIGINAL'])
+    } finally {
+      source.close()
+      await source.delete()
+    }
+  })
+
+  it('executes and undoes representative permanent deletion', async () => {
+    const service = new MouseKeeperService(business)
+    const task = (await service.createTask({ operationId: crypto.randomUUID(), title: '撤回永久删除', dueDate: '2026-08-02' })).value
+    await service.softDeleteTask({ operationId: crypto.randomUUID(), taskId: task.id, expectedRevision: task.revision })
+    const { orchestrator } = harness([
+      { text: '', calls: [toolCall('purge-task', 'data.purge.execute', { entityType: 'task', entityId: task.id })] },
+      { text: '已永久删除。' }
+    ])
+    const result = await orchestrator.run(input('永久删除回收站中的任务', '/data'))
+    expect(result.status).toBe('succeeded')
+    expect(result.commandRun.recoveryKind).toBe('full-backup')
+    expect(await business.tasks.get(task.id)).toBeUndefined()
+    await recovery.undo(result.commandRunId)
+    expect(await business.tasks.get(task.id)).toMatchObject({ id: task.id, deletedFlag: 1 })
+  })
+
+  it('allows undo when a later tool fails after a real mutation', async () => {
+    const { orchestrator } = harness([
+      { text: '', calls: [toolCall('create-before-failure', 'cage.create', { cageNumber: 'FAILED-BUT-MUTATED', maxCapacity: 2 })] },
+      { text: '', calls: [toolCall('terminal-failure', 'capability.does-not-exist', {})] },
+      { text: '最后一步失败。' }
+    ])
+    const result = await orchestrator.run(input('创建笼位后继续处理'))
+    expect(result.status).toBe('failed')
+    expect(result.commandRun.changes.length).toBeGreaterThan(0)
+    expect((await business.cages.toArray()).map((cage) => cage.cageNumber)).toContain('FAILED-BUT-MUTATED')
+    await recovery.undo(result.commandRunId)
+    expect((await business.cages.toArray()).map((cage) => cage.cageNumber)).not.toContain('FAILED-BUT-MUTATED')
   })
 })

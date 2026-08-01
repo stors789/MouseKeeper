@@ -24,7 +24,9 @@ const POLICIES: Readonly<Record<string, readonly [CapabilityRisk, RecoveryStrate
   'data.backup.export': ['reversible', 'row-diff'],
   'data.csv.export': ['read-only', 'none'],
   'data.file.request': ['view-only', 'none'],
+  'data.backup.preview': ['read-only', 'none'],
   'data.backup.restore': ['high-impact', 'full-backup'],
+  'data.csv.preview': ['read-only', 'none'],
   'data.csv.import': ['high-impact', 'full-backup'],
   'data.purge.preview': ['read-only', 'none'],
   'data.purge.execute': ['irreversible', 'full-backup'],
@@ -101,8 +103,10 @@ function argsFor(id: string, token: string): Record<string, unknown> {
     'sample.delete': { sampleBatchId: commonId },
     'data.backup.export': {},
     'data.file.request': { kind: 'backup-restore' },
-    'data.backup.restore': { fileRequestId: commonId },
-    'data.csv.import': { fileRequestId: commonId, mapping: {} },
+    'data.backup.preview': { fileRequestId: commonId },
+    'data.backup.restore': { previewToken: commonId },
+    'data.csv.preview': { fileRequestId: commonId, mapping: {} },
+    'data.csv.import': { previewToken: commonId },
     'data.csv.export': { kind: 'mice' },
     'data.purge.preview': { entityType: 'mouse', entityId: commonId },
     'data.purge.execute': { entityType: 'mouse', entityId: commonId }
@@ -157,7 +161,7 @@ const AUDIT_MAPPINGS: readonly [string, readonly string[]][] = [
   ['查看总览统计、分布、容量、任务和活动', ['query.dashboard']], ['搜索小鼠', ['view.configure']], ['按性别筛选小鼠', ['view.configure']], ['按状态筛选小鼠', ['view.configure']], ['按品系/基因型筛选小鼠', ['view.configure']], ['按笼位筛选小鼠', ['view.configure']], ['按实验筛选小鼠', ['view.configure']], ['按标签筛选小鼠', ['view.configure']], ['按出生日期范围筛选小鼠', ['view.configure']], ['包含已删除小鼠', ['view.configure']], ['设置小鼠排序字段与方向', ['view.configure']], ['小鼠分页及每页数量', ['view.configure']], ['清除小鼠筛选', ['view.configure']], ['选择单只、当前页或筛选结果中的小鼠', ['view.configure']], ['创建保存视图', ['saved-view.create']], ['应用保存视图', ['view.configure']], ['更新保存视图', ['saved-view.update']], ['删除保存视图', ['saved-view.delete']],
   ['创建单只小鼠并可初始分笼', ['mouse.create']], ['复制现有小鼠为新记录', ['query.entities', 'mouse.create']], ['原子批量创建小鼠', ['mouse.create.batch']], ['编辑小鼠全部可编辑字段', ['mouse.update']], ['批量更改小鼠状态', ['mouse.status.batch']], ['单只更改小鼠状态', ['mouse.status.set']], ['终结小鼠状态并结束关系', ['mouse.status.set']], ['批量转笼', ['mouse.move.batch']], ['单只移入/转入笼位', ['mouse.move']], ['单只移出笼位', ['mouse.cage.leave']], ['批量增删标签', ['mouse.tags.batch']], ['单只设置标签', ['mouse.tags.set']], ['创建标签并立即关联', ['tag.create', 'mouse.tags.set']], ['删除标签', ['tag.delete']], ['软删除小鼠', ['mouse.delete']], ['从回收站恢复小鼠', ['mouse.restore']], ['查看小鼠详情、谱系、笼位、实验、体重和时间线', ['query.entities', 'navigation.open.entity']], ['创建一般事件', ['event.create']], ['编辑一般事件', ['event.update']], ['软删除事件或配对体重', ['event.delete']], ['从回收站恢复事件或配对体重', ['event.restore']], ['记录单次体重', ['weight.record']], ['快速批量记录体重', ['weight.record.batch']],
   ['搜索笼位', ['query.entities']], ['查看笼位容量、成员和转笼历史', ['query.entities', 'navigation.open.entity']], ['创建笼位', ['cage.create']], ['编辑笼位全部可编辑字段', ['cage.update']], ['从笼位详情选择小鼠移入', ['mouse.move']], ['从笼位详情移出成员', ['mouse.cage.leave']], ['软删除空笼位', ['cage.delete']], ['从回收站恢复笼位', ['cage.restore']], ['查看繁育组合与窝列表', ['query.entities']], ['创建繁育组合并处理规则警告', ['breeding.create']], ['编辑繁育日期、状态和备注', ['breeding.update']], ['原子创建窝和后代', ['breeding.litter.create']], ['查看实验、组别和成员', ['query.entities']], ['创建实验及初始组别', ['experiment.create']], ['编辑实验全部可编辑字段', ['experiment.update']], ['创建实验组别', ['experiment.group.create']], ['批量将小鼠加入实验组', ['experiment.assign.batch']], ['单只加入实验组', ['experiment.assign']], ['单只退出实验', ['experiment.exit']], ['批量退出实验', ['experiment.exit.batch']], ['软删除实验', ['experiment.delete']], ['从回收站恢复实验', ['experiment.restore']],
-  ['切换事件、体重、活动日志记录视图', ['view.configure']], ['搜索/按小鼠筛选记录', ['view.configure', 'query.entities']], ['创建任务并关联小鼠/笼位/实验', ['task.create']], ['编辑任务全部可编辑字段', ['task.update']], ['按待处理/完成/取消/全部筛选任务', ['view.configure']], ['完成任务', ['task.status.set']], ['取消任务', ['task.status.set']], ['恢复任务为待处理', ['task.status.set']], ['软删除任务', ['task.delete']], ['从回收站恢复任务', ['task.restore']], ['导出完整 JSON 备份', ['data.backup.export']], ['选择并预检 JSON 恢复文件', ['data.file.request']], ['用 JSON 替换恢复整个数据库', ['data.backup.restore']], ['选择、解析和预览小鼠 CSV', ['data.file.request']], ['自动建议并手动修改 CSV 字段映射', ['data.csv.import']], ['逐行提交合法 CSV 小鼠', ['data.csv.import']], ['导出小鼠 CSV', ['data.csv.export']], ['导出笼位 CSV', ['data.csv.export']], ['导出实验 CSV', ['data.csv.export']], ['导出体重 CSV', ['data.csv.export']], ['导出事件 CSV', ['data.csv.export']], ['从回收站恢复标签', ['tag.restore']],
+  ['切换事件、体重、活动日志记录视图', ['view.configure']], ['搜索/按小鼠筛选记录', ['view.configure', 'query.entities']], ['创建任务并关联小鼠/笼位/实验', ['task.create']], ['编辑任务全部可编辑字段', ['task.update']], ['按待处理/完成/取消/全部筛选任务', ['view.configure']], ['完成任务', ['task.status.set']], ['取消任务', ['task.status.set']], ['恢复任务为待处理', ['task.status.set']], ['软删除任务', ['task.delete']], ['从回收站恢复任务', ['task.restore']], ['导出完整 JSON 备份', ['data.backup.export']], ['选择并预检 JSON 恢复文件', ['data.file.request', 'data.backup.preview']], ['用 JSON 替换恢复整个数据库', ['data.backup.restore']], ['选择、解析和预览小鼠 CSV', ['data.file.request', 'data.csv.preview']], ['自动建议并手动修改 CSV 字段映射', ['data.csv.preview']], ['逐行提交合法 CSV 小鼠', ['data.csv.import']], ['导出小鼠 CSV', ['data.csv.export']], ['导出笼位 CSV', ['data.csv.export']], ['导出实验 CSV', ['data.csv.export']], ['导出体重 CSV', ['data.csv.export']], ['导出事件 CSV', ['data.csv.export']], ['从回收站恢复标签', ['tag.restore']],
   ['永久删除回收站小鼠及允许的依赖', ['data.purge.preview', 'data.purge.execute']], ['永久删除回收站笼位', ['data.purge.preview', 'data.purge.execute']], ['永久删除回收站实验', ['data.purge.preview', 'data.purge.execute']], ['永久删除回收站任务', ['data.purge.preview', 'data.purge.execute']], ['永久删除回收站标签', ['data.purge.preview', 'data.purge.execute']], ['永久删除允许删除的事件/体重对', ['data.purge.preview', 'data.purge.execute']], ['生成示例数据批次', ['sample.create']], ['删除指定示例数据批次', ['sample.delete']], ['请求浏览器持久存储', ['settings.storage.persist']], ['查看存储占用、持久状态和数据库版本', ['settings.storage.status']], ['运行数据库完整性扫描', ['query.integrity']]
 ]
 
@@ -200,7 +204,7 @@ const workflowCases = Array.from({ length: 36 }, (_, index) => makeCase({ id: `F
 const safetyPatterns: readonly (readonly string[])[] = [['mouse.delete'], ['mouse.restore'], ['data.purge.preview', 'data.purge.execute'], ['task.status.set'], ['mouse.status.batch'], ['cage.create', 'mouse.create']]
 const safetyCases = Array.from({ length: 24 }, (_, index) => makeCase({ id: `SAFE-${String(index + 1).padStart(3, '0')}`, category: 'safety-recovery', prompt: `恢复撤回安全案例 ${index + 1}：执行后验证恢复边界${index >= 21 ? '并制造冲突' : ''}`, capabilityIds: safetyPatterns[index % safetyPatterns.length]!, tags: [index >= 21 ? 'undo-conflict' : index >= 12 ? 'batch-undo' : 'undo'] }))
 
-const filePatterns: readonly (readonly string[])[] = [['data.file.request'], ['data.file.request', 'data.backup.restore'], ['data.file.request', 'data.csv.import'], ['data.csv.export']]
+const filePatterns: readonly (readonly string[])[] = [['data.file.request'], ['data.file.request', 'data.backup.preview', 'data.backup.restore'], ['data.file.request', 'data.csv.preview', 'data.csv.import'], ['data.csv.export']]
 const fileCases = Array.from({ length: 12 }, (_, index) => makeCase({ id: `FILE-${String(index + 1).padStart(3, '0')}`, category: 'file-gesture', prompt: `文件用户手势案例 ${index + 1}：选择后再继续处理文件`, capabilityIds: filePatterns[index % filePatterns.length]!, tags: [index >= 10 ? 'file-error' : 'two-stage'], outcome: index % 4 === 0 ? 'needs-user-action' : 'succeeded' }))
 
 const failureClasses = ['missing-argument', 'not-found', 'ambiguous', 'business-rule', 'revision-conflict', 'tool-correction', 'partial-completion', 'cancelled', 'round-limit', 'duplicate-call', 'invalid-json', 'secret-redaction', 'capacity', 'deleted-entity', 'non-atomic', 'unknown-tool'] as const
