@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
+  ArrowUpRight,
   BookmarkPlus,
   FilterX,
   LayoutGrid,
@@ -755,13 +756,18 @@ export function MicePage() {
     <ul className={className} aria-label={label}>
       {visible.map(({ mouse, cageNumber, tagNames }) => (
         <li className="mobile-record-card" key={mouse.id}>
+          <Link
+            aria-label={`查看 ${mouseDisplayLabel(mouse)} 详情`}
+            className="record-card__stretched-link"
+            href={`/mice/${encodeURIComponent(mouse.id)}`}
+          />
           <span
             className="mobile-record-card__rail"
             aria-hidden="true"
           />
           <div className="mobile-record-card__body">
             <div className="mobile-record-card__title">
-              <label className="record-selection">
+              <div className="mobile-record-card__identity">
                 <input
                   aria-label={`选择 ${mouseDisplayLabel(mouse)}`}
                   checked={selectedIds.has(mouse.id)}
@@ -771,10 +777,8 @@ export function MicePage() {
                     toggleSelected(mouse.id, event.target.checked)
                   }
                 />
-                <Link href={`/mice/${encodeURIComponent(mouse.id)}`}>
-                  {mouseDisplayLabel(mouse)}
-                </Link>
-              </label>
+                <strong>{mouseDisplayLabel(mouse)}</strong>
+              </div>
               {mouse.deletedFlag === 1 ? (
                 <span className="record-deleted-label">回收站</span>
               ) : (
@@ -795,6 +799,7 @@ export function MicePage() {
                 <span>{tagNames.slice(0, 2).join(' · ')}</span>
               ) : null}
             </div>
+            <span className="record-card__open">查看小鼠详情 <ArrowUpRight aria-hidden="true" size={14} /></span>
           </div>
         </li>
       ))}

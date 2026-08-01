@@ -3046,6 +3046,29 @@ kbd {
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   background: var(--bg-surface);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
+}
+
+.mobile-record-card:hover,
+.mobile-record-card:has(.record-card__stretched-link:focus-visible) {
+  border-color: var(--border-strong);
+  box-shadow: 0 5px 18px rgb(15 25 30 / 0.07);
+  transform: translateY(-1px);
+}
+
+.record-card__stretched-link {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.record-card__stretched-link:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--focus) 55%, transparent);
+  outline-offset: -3px;
 }
 
 .mobile-record-card__rail {
@@ -3132,11 +3155,51 @@ kbd {
 .breeding-record,
 .litter-record,
 .experiment-record {
-  padding: 16px;
   transition:
     border-color 120ms ease,
     box-shadow 120ms ease,
     transform 120ms ease;
+}
+
+.breeding-record,
+.litter-record {
+  padding: 16px;
+}
+
+.record-card__link {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  border-radius: inherit;
+  color: inherit;
+  text-decoration: none;
+}
+
+.record-card__link:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--focus) 55%, transparent);
+  outline-offset: -3px;
+}
+
+.record-card__open {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 5px;
+  margin-top: auto;
+  padding-top: 14px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 740;
+}
+
+.record-card__open svg {
+  transition: transform 120ms ease;
+}
+
+.record-card__link:hover .record-card__open svg,
+.mobile-record-card:hover .record-card__open svg {
+  transform: translate(2px, -2px);
 }
 
 .cage-record:hover,
@@ -4302,6 +4365,28 @@ kbd {
 .mobile-record-card__body {
   min-width: 0;
   padding: 14px;
+}
+
+.mobile-record-card__identity {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.mobile-record-card__identity input {
+  position: relative;
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+.mobile-record-card__identity strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-strong);
 }
 
 .mobile-record-card__body > p {

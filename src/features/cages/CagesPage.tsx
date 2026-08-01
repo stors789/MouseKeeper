@@ -1,6 +1,7 @@
 import { useDeferredValue, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
+  ArrowUpRight,
   Boxes,
   Gauge,
   Plus,
@@ -184,52 +185,41 @@ export function CagesPage() {
 
               return (
                 <li className="cage-record" key={cage.id}>
-                  <div className="cage-record__title">
-                    <div>
-                      <Link href={`/cages/${encodeURIComponent(cage.id)}`}>
-                        {cage.cageNumber}
-                      </Link>
-                      <p>
-                        {[cage.room, cage.rack, cage.purpose]
-                          .filter(Boolean)
-                          .join(' · ') || '位置与用途未记录'}
-                      </p>
+                  <Link className="record-card__link" href={`/cages/${encodeURIComponent(cage.id)}`}>
+                    <div className="cage-record__title">
+                      <div>
+                        <h3>{cage.cageNumber}</h3>
+                        <p>
+                          {[cage.room, cage.rack, cage.purpose]
+                            .filter(Boolean)
+                            .join(' · ') || '位置与用途未记录'}
+                        </p>
+                      </div>
+                      <StatusChip
+                        icon={tone === 'critical' ? TriangleAlert : Gauge}
+                        label={`${mice.length} / ${cage.maxCapacity}`}
+                        tone={tone}
+                      />
                     </div>
-                    <StatusChip
-                      icon={tone === 'critical' ? TriangleAlert : Gauge}
-                      label={`${mice.length} / ${cage.maxCapacity}`}
-                      tone={tone}
-                    />
-                  </div>
-                  <div
-                    className="capacity-track"
-                    data-tone={tone}
-                    role="meter"
-                    aria-label={`笼位 ${cage.cageNumber} 容量`}
-                    aria-valuemin={0}
-                    aria-valuemax={cage.maxCapacity}
-                    aria-valuenow={Math.min(mice.length, cage.maxCapacity)}
-                    aria-valuetext={`${mice.length} / ${cage.maxCapacity}${mice.length > cage.maxCapacity ? '，已超容' : ''}`}
-                  >
-                    <span style={{ width: `${ratio}%` }} />
-                  </div>
-                  <dl className="cage-record__facts">
-                    <div>
-                      <dt>状态</dt>
-                      <dd>{CAGE_STATUS_LABELS[cage.status]}</dd>
+                    <div
+                      className="capacity-track"
+                      data-tone={tone}
+                      role="meter"
+                      aria-label={`笼位 ${cage.cageNumber} 容量`}
+                      aria-valuemin={0}
+                      aria-valuemax={cage.maxCapacity}
+                      aria-valuenow={Math.min(mice.length, cage.maxCapacity)}
+                      aria-valuetext={`${mice.length} / ${cage.maxCapacity}${mice.length > cage.maxCapacity ? '，已超容' : ''}`}
+                    >
+                      <span style={{ width: `${ratio}%` }} />
                     </div>
-                    <div>
-                      <dt>性别组成</dt>
-                      <dd>
-                        {MOUSE_SEX_LABELS.male} {males} ·{' '}
-                        {MOUSE_SEX_LABELS.female} {females}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>主要品系</dt>
-                      <dd>{cage.primaryStrain ?? '未指定'}</dd>
-                    </div>
-                  </dl>
+                    <dl className="cage-record__facts">
+                      <div><dt>状态</dt><dd>{CAGE_STATUS_LABELS[cage.status]}</dd></div>
+                      <div><dt>性别组成</dt><dd>{MOUSE_SEX_LABELS.male} {males} · {MOUSE_SEX_LABELS.female} {females}</dd></div>
+                      <div><dt>主要品系</dt><dd>{cage.primaryStrain ?? '未指定'}</dd></div>
+                    </dl>
+                    <span className="record-card__open">查看笼位详情 <ArrowUpRight aria-hidden="true" size={14} /></span>
+                  </Link>
                 </li>
               )
             })}

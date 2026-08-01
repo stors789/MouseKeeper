@@ -276,9 +276,13 @@ test('creates a cage, an assigned mouse, a weight, and a linked task', async ({
   await page.getByLabel('最大容量').fill('5')
   await page.getByRole('button', { name: '保存笼位' }).click()
   await expect(page).toHaveURL(/\/cages\/(?!new$)[^/]+$/)
+  const cageDetailUrl = page.url()
   await expect(
     page.getByRole('heading', { level: 2, name: 'E2E-CAGE' })
   ).toBeVisible()
+  await page.goto('/cages')
+  await page.locator('.cage-record').filter({ hasText: 'E2E-CAGE' }).getByRole('link').click()
+  await expect(page).toHaveURL(cageDetailUrl)
 
   await page.goto('/mice/new')
   await page.getByLabel('耳标号').fill('E2E-MOUSE')
@@ -287,10 +291,15 @@ test('creates a cage, an assigned mouse, a weight, and a linked task', async ({
   await page.getByRole('option', { name: /E2E-CAGE/ }).click()
   await page.getByRole('button', { name: '保存小鼠' }).click()
   await expect(page).toHaveURL(/\/mice\/(?!new$)[^/]+$/)
+  const mouseDetailUrl = page.url()
   await expect(
     page.getByRole('heading', { level: 2, name: 'E2E-MOUSE' })
   ).toBeVisible()
   await expect(page.getByText('E2E-CAGE', { exact: true })).toBeVisible()
+  await page.goto('/mice')
+  await page.getByRole('button', { name: '卡片视图' }).click()
+  await page.getByRole('link', { name: '查看 E2E-MOUSE 详情' }).click()
+  await expect(page).toHaveURL(mouseDetailUrl)
 
   await page.getByRole('button', { name: '记录体重' }).click()
   const weightDialog = page.getByRole('dialog', { name: '记录体重' })
@@ -462,6 +471,10 @@ test('records weight and event, assigns an experiment, and completes a task', as
   await page.getByLabel('实验名称').fill('E2E Study')
   await page.getByRole('button', { name: '创建实验与组别' }).click()
   await expect(page).toHaveURL(/\/experiments\/(?!new$)[^/]+$/)
+  const experimentDetailUrl = page.url()
+  await page.goto('/experiments')
+  await page.locator('.experiment-record').filter({ hasText: 'E2E Study' }).getByRole('link').click()
+  await expect(page).toHaveURL(experimentDetailUrl)
   await page.getByRole('button', { name: '批量加入小鼠' }).click()
   const assignmentDialog = page.getByRole('dialog', {
     name: '批量加入实验组'

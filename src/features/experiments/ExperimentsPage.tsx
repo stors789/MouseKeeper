@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { FlaskConical, Plus } from 'lucide-react'
+import { ArrowUpRight, FlaskConical, Plus } from 'lucide-react'
 import { Link } from 'wouter'
 import { buttonClassName } from '../../components/ui/Button'
 import { EmptyState } from '../../components/ui/EmptyState'
@@ -100,43 +100,32 @@ export function ExperimentsPage() {
         <ul className="record-grid" aria-label="实验列表">
           {records.map(({ experiment, groups, activeAssignments }) => (
             <li className="experiment-record" key={experiment.id}>
-              <div className="experiment-record__header">
-                <div>
-                  <Link href={`/experiments/${encodeURIComponent(experiment.id)}`}>
-                    {experiment.name}
-                  </Link>
-                  <p>{experiment.code ?? '未设置实验编号'}</p>
+              <Link className="record-card__link" href={`/experiments/${encodeURIComponent(experiment.id)}`}>
+                <div className="experiment-record__header">
+                  <div>
+                    <h3>{experiment.name}</h3>
+                    <p>{experiment.code ?? '未设置实验编号'}</p>
+                  </div>
+                  <StatusChip
+                    icon={FlaskConical}
+                    label={EXPERIMENT_STATUS_LABELS[experiment.status]}
+                    tone={experimentTone(experiment.status)}
+                  />
                 </div>
-                <StatusChip
-                  icon={FlaskConical}
-                  label={EXPERIMENT_STATUS_LABELS[experiment.status]}
-                  tone={experimentTone(experiment.status)}
-                />
-              </div>
-              <dl className="record-fact-grid">
-                <div>
-                  <dt>起止日期</dt>
-                  <dd>
-                    {formatLocalDate(experiment.startDate)} –{' '}
-                    {formatLocalDate(experiment.endDate)}
-                  </dd>
-                </div>
-                <div>
-                  <dt>负责人</dt>
-                  <dd>{experiment.principalInvestigator ?? '未记录'}</dd>
-                </div>
-                <div>
-                  <dt>组别</dt>
-                  <dd>{groups.length} 个</dd>
-                </div>
-                <div>
-                  <dt>活动成员</dt>
-                  <dd>{new Set(activeAssignments.map((item) => item.mouseId)).size} 只</dd>
-                </div>
-              </dl>
-              <p className="record-footnote">
-                {experiment.intervention ?? experiment.description ?? '暂无干预说明'}
-              </p>
+                <dl className="record-fact-grid">
+                  <div>
+                    <dt>起止日期</dt>
+                    <dd>{formatLocalDate(experiment.startDate)} – {formatLocalDate(experiment.endDate)}</dd>
+                  </div>
+                  <div><dt>负责人</dt><dd>{experiment.principalInvestigator ?? '未记录'}</dd></div>
+                  <div><dt>组别</dt><dd>{groups.length} 个</dd></div>
+                  <div><dt>活动成员</dt><dd>{new Set(activeAssignments.map((item) => item.mouseId)).size} 只</dd></div>
+                </dl>
+                <p className="record-footnote">
+                  {experiment.intervention ?? experiment.description ?? '暂无干预说明'}
+                </p>
+                <span className="record-card__open">查看实验详情 <ArrowUpRight aria-hidden="true" size={14} /></span>
+              </Link>
             </li>
           ))}
         </ul>
