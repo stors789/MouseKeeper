@@ -270,11 +270,6 @@ export function DataPage() {
   const restoreBackup = () => {
     if (!restoreFile || !restorePreview?.canRestore) return
     void run('restore', async () => {
-      const safetyBackup = await exportDatabaseBackup(appDatabase)
-      downloadBlob(
-        backupBlob(safetyBackup),
-        timestampFilename('mousekeeper-before-restore', 'json')
-      )
       const restoreResult = await restoreDatabaseBackup(
         appDatabase,
         restoreFile
@@ -288,7 +283,7 @@ export function DataPage() {
       setRestoreConfirmation('')
       showToast({
         title: '本地数据已恢复',
-        description: '已发起恢复前与事务内精确安全备份下载。',
+        description: '已发起事务内精确恢复前安全备份下载。',
         tone: 'positive',
         duration: 10_000
       })
@@ -351,73 +346,98 @@ export function DataPage() {
           experiment
         ])
       )
+      const activeAssignmentCountByCage = new Map<string, number>()
+      for (const assignment of inventory.assignments) {
+        if (assignment.activeFlag !== 1 || assignment.deletedFlag !== 0) {
+          continue
+        }
+        activeAssignmentCountByCage.set(
+          assignment.cageId,
+          (activeAssignmentCountByCage.get(assignment.cageId) ?? 0) + 1
+        )
+      }
+      const groupCountByExperiment = new Map<string, number>()
+      for (const group of inventory.groups) {
+        if (group.deletedFlag !== 0) continue
+        groupCountByExperiment.set(
+          group.experimentId,
+          (groupCountByExperiment.get(group.experimentId) ?? 0) + 1
+        )
+      }
+      const activeMouseIdsByExperiment = new Map<string, Set<string>>()
+      for (const assignment of inventory.experimentAssignments) {
+        if (assignment.activeFlag !== 1 || assignment.deletedFlag !== 0) {
+          continue
+        }
+        const mouseIds =
+          activeMouseIdsByExperiment.get(assignment.experimentId) ??
+          new Set<string>()
+        mouseIds.add(assignment.mouseId)
+        activeMouseIdsByExperiment.set(assignment.experimentId, mouseIds)
+      }
       let csv: string
       if (kind === 'mice') {
         csv = exportMiceCsv(
-          inventory.mice.map((mouse) => ({
-            mouse,
-            cageNumber: mouse.currentCageId
-              ? cageById.get(mouse.currentCageId)?.cageNumber
-              : undefined,
-            tagNames: mouse.tagIds.flatMap((id) => {
-              const tag = tagById.get(id)
-              return tag ? [tag.name] : []
-            })
-          }))
+          inventory.mice
+            .filter(mouse => mouse.deletedFlag === 0)
+            .map((mouse) => ({
+              mouse,
+              cageNumber: mouse.currentCageId
+                ? cageById.get(mouse.currentCageId)?.cageNumber
+                : undefined,
+              tagNames: mouse.tagIds.flatMap((id) => {
+                const tag = tagById.get(id)
+                return tag ? [tag.name] : []
+              })
+            }))
         )
       } else if (kind === 'cages') {
         csv = exportCagesCsv(
-          inventory.cages.map((cage) => ({
-            cage,
-            currentCount: inventory.assignments.filter(
-              (assignment) =>
-                assignment.cageId === cage.id &&
-                assignment.activeFlag === 1 &&
-                assignment.deletedFlag === 0
-            ).length
-          }))
+          inventory.cages
+            .filter(cage => cage.deletedFlag === 0)
+            .map((cage) => ({
+              cage,
+              currentCount: activeAssignmentCountByCage.get(cage.id) ?? 0
+            }))
         )
       } else if (kind === 'experiments') {
         csv = exportExperimentsCsv(
-          inventory.experiments.map((experiment) => ({
-            experiment,
-            groupCount: inventory.groups.filter(
-              (group) => group.experimentId === experiment.id
-            ).length,
-            activeMouseCount: new Set(
-              inventory.experimentAssignments
-                .filter(
-                  (assignment) =>
-                    assignment.experimentId === experiment.id &&
-                    assignment.activeFlag === 1
-                )
-                .map((assignment) => assignment.mouseId)
-            ).size
-          }))
+          inventory.experiments
+            .filter(experiment => experiment.deletedFlag === 0)
+            .map((experiment) => ({
+              experiment,
+              groupCount: groupCountByExperiment.get(experiment.id) ?? 0,
+              activeMouseCount:
+                activeMouseIdsByExperiment.get(experiment.id)?.size ?? 0
+            }))
         )
       } else if (kind === 'weights') {
         csv = exportWeightsCsv(
-          inventory.weights.map((weight) => ({
-            weight,
-            mouseLabel: mouseById.has(weight.mouseId)
-              ? mouseDisplayLabel(mouseById.get(weight.mouseId)!)
-              : weight.mouseId
-          }))
+          inventory.weights
+            .filter(weight => weight.deletedFlag === 0)
+            .map((weight) => ({
+              weight,
+              mouseLabel: mouseById.has(weight.mouseId)
+                ? mouseDisplayLabel(mouseById.get(weight.mouseId)!)
+                : weight.mouseId
+            }))
         )
       } else {
         csv = exportEventsCsv(
-          inventory.events.map((event) => ({
-            event,
-            mouseLabel: mouseById.has(event.mouseId)
-              ? mouseDisplayLabel(mouseById.get(event.mouseId)!)
-              : event.mouseId,
-            cageNumber: event.cageId
-              ? cageById.get(event.cageId)?.cageNumber
-              : undefined,
-            experimentName: event.experimentId
-              ? experimentById.get(event.experimentId)?.name
-              : undefined
-          }))
+          inventory.events
+            .filter(event => event.deletedFlag === 0)
+            .map((event) => ({
+              event,
+              mouseLabel: mouseById.has(event.mouseId)
+                ? mouseDisplayLabel(mouseById.get(event.mouseId)!)
+                : event.mouseId,
+              cageNumber: event.cageId
+                ? cageById.get(event.cageId)?.cageNumber
+                : undefined,
+              experimentName: event.experimentId
+                ? experimentById.get(event.experimentId)?.name
+                : undefined
+            }))
         )
       }
       downloadBlob(

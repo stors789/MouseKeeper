@@ -1,3 +1,5 @@
+import Dexie from 'dexie'
+
 import { APP_CONFIG } from '../config/app'
 import type { MouseKeeperDatabase } from '../db'
 import { calculateBackupChecksum, canonicalJson } from './canonical'
@@ -137,7 +139,8 @@ export async function exportDatabaseBackup(
 
 async function createBackupFromData(
   data: BackupData,
-  options: ExportBackupOptions = {}
+  options: ExportBackupOptions = {},
+  validateOutput = true
 ): Promise<BackupEnvelope> {
   const unsigned: BackupUnsignedEnvelope = {
     format: BACKUP_FORMAT,
@@ -161,10 +164,14 @@ async function createBackupFromData(
     }
   }
 
-  // Validate exports with the same untrusted-input path used by restore.
-  // This prevents producing a signed backup from an already inconsistent DB.
-  const validated = await parseAndValidateBackup(canonicalJson(backup))
-  return validated.backup
+  if (validateOutput) {
+    // Validate ordinary exports with the same untrusted-input path used by
+    // restore. A pre-restore salvage copy intentionally preserves even an
+    // inconsistent current database, so it only receives a checksum.
+    const validated = await parseAndValidateBackup(canonicalJson(backup))
+    return validated.backup
+  }
+  return backup
 }
 
 export function serializeBackup(backup: BackupEnvelope): string {
@@ -225,8 +232,9 @@ function assertRequiredDatabaseTables(database: MouseKeeperDatabase): void {
 async function replaceAllTables(
   database: MouseKeeperDatabase,
   data: BackupData,
-  failBeforeTable: BackupTableName | undefined
-): Promise<BackupData> {
+  failBeforeTable: BackupTableName | undefined,
+  preRestoreOptions: ExportBackupOptions
+): Promise<BackupEnvelope> {
   assertRequiredDatabaseTables(database)
 
   const clearers: Record<BackupTableName, () => Promise<unknown>> = {
@@ -271,8 +279,10 @@ async function replaceAllTables(
   }
 
   return database.transaction('rw', database.tables, async () => {
-    const previousData =
-      await readAllTablesInCurrentTransaction(database)
+    const previousData = await readAllTablesInCurrentTransaction(database)
+    const preRestoreBackup = await Dexie.waitFor(
+      createBackupFromData(previousData, preRestoreOptions, false)
+    )
     for (const table of BACKUP_TABLE_NAMES) {
       await clearers[table]()
     }
@@ -282,7 +292,7 @@ async function replaceAllTables(
       }
       await writers[table]()
     }
-    return previousData
+    return preRestoreBackup
   })
 }
 
@@ -296,15 +306,15 @@ export async function restoreDatabaseBackup(
   // Read the exact pre-restore state inside the same all-table write
   // transaction that performs replacement. This closes the cross-tab window
   // where a concurrent commit could otherwise be absent from the safety copy.
-  const preRestoreData = await replaceAllTables(
+  const preRestoreBackup = await replaceAllTables(
     database,
     validated.backup.data,
-    options.testOnlyFailBeforeTable
+    options.testOnlyFailBeforeTable,
+    {
+      backupId: options.preRestoreBackupId,
+      exportedAt: options.preRestoreExportedAt
+    }
   )
-  const preRestoreBackup = await createBackupFromData(preRestoreData, {
-    backupId: options.preRestoreBackupId,
-    exportedAt: options.preRestoreExportedAt
-  })
 
   return {
     restoredBackupId: validated.backup.backupId,

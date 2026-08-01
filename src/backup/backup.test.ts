@@ -164,6 +164,33 @@ describe('versioned database backup', () => {
     ])
   })
 
+  it('captures an inconsistent prior database before committing replacement', async () => {
+    const source = createDatabase('salvage-source')
+    const target = createDatabase('salvage-target')
+    await source.mice.add(mouse('new-mouse', 'NEW-1'))
+    await target.mice.add({
+      ...mouse('old-mouse', 'OLD-1'),
+      strainKey: 'inconsistent-helper'
+    })
+    const sourceBackup = await exportDatabaseBackup(source)
+
+    const result = await restoreDatabaseBackup(
+      target,
+      serializeBackup(sourceBackup)
+    )
+
+    expect((await target.mice.toArray()).map(item => item.id)).toEqual([
+      'new-mouse'
+    ])
+    expect(result.preRestoreBackup.data.mice[0]).toMatchObject({
+      id: 'old-mouse',
+      strainKey: 'inconsistent-helper'
+    })
+    expect(result.preRestoreBackup.integrity.canonicalPayloadDigest).toMatch(
+      /^[0-9a-f]{64}$/
+    )
+  })
+
   it('rejects truncated JSON', async () => {
     const database = createDatabase('truncated')
     const backup = await exportDatabaseBackup(database)
@@ -253,6 +280,29 @@ describe('versioned database backup', () => {
       await resign(missingReference)
     )
     expect(hasIssue(referencePreview, 'missing-reference')).toBe(true)
+  })
+
+  it('rejects parent chronology corruption even with a valid checksum', async () => {
+    const database = createDatabase('parent-chronology')
+    await database.mice.bulkAdd([
+      {
+        ...mouse('parent', 'PARENT-1'),
+        birthDate: '2024-01-01'
+      },
+      {
+        ...mouse('offspring', 'OFFSPRING-1'),
+        birthDate: '2025-01-01',
+        sireId: 'parent'
+      }
+    ])
+    const backup = cloneBackup(await exportDatabaseBackup(database))
+    const parent = backup.data.mice.find(item => item.id === 'parent')!
+    parent.birthDate = '2026-01-01'
+
+    const preview = await createRestorePreview(await resign(backup))
+
+    expect(preview.canRestore).toBe(false)
+    expect(hasIssue(preview, 'relation-mismatch')).toBe(true)
   })
 
   it('rejects derived helper keys that disagree with authoritative fields', async () => {
