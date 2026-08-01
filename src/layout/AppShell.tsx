@@ -10,7 +10,7 @@ import {
 } from 'react'
 import { useLocation } from 'wouter'
 import { APP_CONFIG } from '../config/app'
-import { APPLICATION_EVENT_NAMES } from '../application'
+import { APPLICATION_EVENT_NAMES, applicationContextStore, applicationNavigationGuard } from '../application'
 import { CreateMenu } from './CreateMenu'
 import { MobileNavigation } from './MobileNavigation'
 import { Sidebar } from './Sidebar'
@@ -53,6 +53,14 @@ export function AppShell({ children }: AppShellProps) {
     document.title = `${pageTitle} · ${APP_CONFIG.name}`
     if (location !== '/agent') {
       window.sessionStorage.setItem('mousekeeper:agent-context-route', location)
+      const workspace = location.startsWith('/mice') ? 'mice'
+        : location.startsWith('/records') ? 'records'
+          : location.startsWith('/tasks') ? 'tasks'
+            : location.startsWith('/data') ? 'data'
+              : undefined
+      const currentWorkspace = applicationContextStore.snapshot()?.workspace
+      if (!workspace && currentWorkspace) applicationContextStore.clear(currentWorkspace)
+      else if (currentWorkspace && workspace !== currentWorkspace) applicationContextStore.clear(currentWorkspace)
     }
     const frame = requestAnimationFrame(() => {
       document.getElementById('main-content')?.focus()
@@ -64,7 +72,8 @@ export function AppShell({ children }: AppShellProps) {
     const navigate = (event: Event) => {
       const detail = (event as CustomEvent<{ href?: unknown }>).detail
       if (typeof detail?.href === 'string' && detail.href.startsWith('/')) {
-        setLocation(detail.href)
+        if (applicationNavigationGuard.confirmNavigation()) setLocation(detail.href)
+        else event.preventDefault()
       }
     }
     const focusSearch = () => setGlobalSearchOpen(true)
@@ -97,7 +106,7 @@ export function AppShell({ children }: AppShellProps) {
 
       if (commandAgent) {
         event.preventDefault()
-        setLocation('/agent')
+        if (applicationNavigationGuard.confirmNavigation()) setLocation('/agent')
         return
       }
 
@@ -138,7 +147,9 @@ export function AppShell({ children }: AppShellProps) {
             aria-keyshortcuts="Meta+J Control+J"
             className="agent-topbar-trigger"
             type="button"
-            onClick={() => setLocation('/agent')}
+            onClick={() => {
+              if (applicationNavigationGuard.confirmNavigation()) setLocation('/agent')
+            }}
           >
             <Bot aria-hidden="true" size={17} />
             <span>Agent</span>

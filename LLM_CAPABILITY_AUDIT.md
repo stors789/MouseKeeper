@@ -9,11 +9,11 @@
 - 一行表示一个可以独立触发、产生不同业务或界面结果的用户能力；没有把整个模块合并成一行。
 - 单一表单内各字段共享同一校验与提交边界，因此“创建/编辑一个实体的全部 UI 可编辑字段”按一次提交能力计；状态、关系、批量、删除、恢复、文件和视图操作分别计数。
 - 纯浏览器行为（安装 PWA、浏览器后退、系统下载落盘）不作为应用能力；应用主动发起下载、请求持久存储和未保存离开保护计入。
-- “LLM 已覆盖”只有在能力可发现、可真实执行、有结果反馈、修改型能力有恢复记录且存在自动化测试时才记为“是”。本表先记录实现前基线，完成后在同一文件更新。
+- “LLM 已覆盖”只有在能力可发现、可真实执行、有结果反馈、修改型能力有恢复记录且存在自动化测试时才记为“是”。下表冻结实现前基线，文件末尾给出最终逐行认证和覆盖率，避免抹去开发前证据。
 
 ## 能力矩阵
 
-| # | 用户能力 | 当前 UI 入口 | 业务实现位置 | 所涉及实体 | 修改数据 | 可撤销 | LLM 已覆盖 | 对应测试 |
+| # | 用户能力 | 当前 UI 入口 | 业务实现位置 | 所涉及实体 | 修改数据 | 可撤销 | LLM 已覆盖（实现前） | 对应测试 |
 |---:|---|---|---|---|:---:|:---:|:---:|---|
 | 1 | 打开一级工作区 | 桌面侧栏、移动导航 | `navigation.ts`、Wouter | 路由状态 | 否 | 不适用 | 否 | `e2e/app.spec.ts` 工作区 |
 | 2 | 通过总览指标打开预筛选列表 | 总览指标卡 | `DashboardPage.tsx` | 路由/查询参数 | 否 | 不适用 | 否 | E2E 工作区 |
@@ -137,3 +137,25 @@
 - 核心代码：`src/App.tsx`、`src/layout/*`、`src/features/**/*Page.tsx`、`src/services/mousekeeper-service.ts`、`src/services/permanent-delete.ts`、`src/backup/*`、`src/import-export/*`、`src/db/*`。
 - 自动化：`src/**/*.test.ts(x)`、`e2e/app.spec.ts`。
 - 文档交叉核验：`README.md`、`docs/architecture.md`、`docs/data-model.md`、`docs/backup-and-recovery.md`、既有 `agent-notes/*`。
+
+## 实现后覆盖认证
+
+最终认证日期：2026-08-01
+
+| 审计行 | 最终覆盖 | LLM 路径 | 自动化证据 | 恢复证据 |
+|---|:---:|---|---|---|
+| 1～106 | 是 | `search_capabilities` → 严格 `execute_capability` → production Registry/Service 或稳定 application adapter | `CAP-001`～`CAP-106` 逐行唯一映射；每个预期调用均对 production descriptor 验证完整 runtime JSON Schema、风险和恢复策略；底层 Service、备份、CSV、查询、视图和 E2E 测试验证真实实现 | 所有 `modifiesData` 能力在首次写入前持久化一致 before；小范围用 row diff，高影响用 full backup；整命令撤回与冲突检查由 recovery/execution eval 验证 |
+
+最终能力总数为 **106**，完整覆盖 **106**，未覆盖 **0**，覆盖率 **100%**。没有通过合并行或缩小分母改变基线。浏览器安全边界下，第 85 项 JSON 文件和第 87 项 CSV 文件仍必须由用户手势选择；选择完成后 Agent 会执行只读 preview，并按原始明确指令自动继续 commit，因此主体工作流已覆盖，不计为缺口。
+
+分层证据如下：
+
+- 发现与参数：69 个基线 application capabilities 与 8 个新增 Agent 设置 capabilities 全部注册到同一 production Registry；模型只获得工具搜索与严格执行两个稳定入口。106 个审计行各有独立 `CAP-nnn`，复合 UI 能力保留所需的多 capability 顺序。
+- 真实执行：业务写入复用 `MouseKeeperService` 的事务、幂等、revision 和规则测试；application tests 直接执行视图、导航、文件、Storage 与数据适配器；9 条 execution eval 使用真实 Registry、Dexie、Service 和 RecoveryManager 验证数据库结果与撤回。
+- 上下文与 UI：页面发布真实筛选、排序、分页和全部选择；新建菜单、搜索、路由、未保存导航保护以及桌面/Pixel 7 Agent 设置均有组件或 Playwright 证据。
+- 文件与高风险操作：JSON/CSV 强制 `request → preview → 一次性 token commit`；备份替换、CSV 导入、代表性永久删除和失败但已变更均有真实执行与整命令撤回测试。
+- 评测边界：288 条默认评测是确定性契约/执行评测，不等价于真实远程模型的开放语言语义准确率。仓库无 Provider 凭据，因此没有把未运行的真实 API 评测计入覆盖证据。
+
+## 最终未覆盖事项
+
+无。真实 Provider 语义质量、Safari/真实移动设备和超大数据库基准属于已知验证限制，不是 106 项现有 UI 用户能力中的未实现能力。

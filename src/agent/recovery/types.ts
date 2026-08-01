@@ -57,8 +57,9 @@ export interface RecoveryStartToken {
   presetId?: string
   model?: string
   startedAt: string
-  before: BackupData
-  beforePreferences: Record<string, string>
+  before?: BackupData
+  beforePreferences?: Record<string, string>
+  preparedAt?: string
 }
 
 export interface RecoveryFinishInput {

@@ -1,13 +1,14 @@
 import type { CapabilityExecutionResult, EntityReference } from '../../application'
 import type { AgentCommandRun, CommandToolTrace } from '../recovery'
-import type { LLMPreset, NormalizedLLMRequest, NormalizedLLMResult, ProviderProfile } from '../provider'
+import type { LLMPreset, NormalizedLLMRequest, NormalizedLLMResult, ProviderEventListener, ProviderProfile } from '../provider'
 
 export interface AgentModelClient {
   generate(
     profile: ProviderProfile,
     preset: LLMPreset,
     input: NormalizedLLMRequest,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onEvent?: ProviderEventListener
   ): Promise<NormalizedLLMResult>
 }
 
@@ -31,6 +32,7 @@ export interface AgentRunInput {
 export type AgentProgress =
   | { type: 'started'; commandRunId: string }
   | { type: 'thinking'; round: number }
+  | { type: 'text-delta'; delta: string; text: string }
   | { type: 'tool-started'; trace: CommandToolTrace }
   | { type: 'tool-completed'; trace: CommandToolTrace; result?: CapabilityExecutionResult }
   | { type: 'text'; text: string }

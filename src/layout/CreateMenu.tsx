@@ -1,6 +1,8 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { ChevronDown, Plus } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { Link } from 'wouter'
+import { APPLICATION_EVENT_NAMES } from '../application'
 import { Button } from '../components/ui/Button'
 import { CREATE_ACTIONS } from './navigation'
 
@@ -13,8 +15,19 @@ export function CreateMenu({
   compact = false,
   mobileContext = false
 }: CreateMenuProps) {
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    const handleOpen = () => {
+      const mobile = globalThis.matchMedia?.('(max-width: 900px)').matches ?? false
+      if (mobile === mobileContext) setOpen(true)
+    }
+    globalThis.addEventListener(APPLICATION_EVENT_NAMES.openCreateMenu, handleOpen)
+    return () => globalThis.removeEventListener(APPLICATION_EVENT_NAMES.openCreateMenu, handleOpen)
+  }, [mobileContext])
+
   return (
-    <DropdownMenu.Root>
+    <DropdownMenu.Root open={open} onOpenChange={setOpen}>
       <DropdownMenu.Trigger asChild>
         <Button
           className={mobileContext ? 'app-create app-create--mobile' : 'app-create'}

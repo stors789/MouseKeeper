@@ -11,7 +11,7 @@ import {
   X
 } from 'lucide-react'
 import { Link } from 'wouter'
-import { APPLICATION_EVENT_NAMES, readApplicationViewCommand, viewCommandFromEvent } from '../../application'
+import { APPLICATION_EVENT_NAMES, applicationContextStore, readApplicationViewCommand, viewCommandFromEvent } from '../../application'
 import { Alert } from '../../components/ui/Alert'
 import { Button, buttonClassName } from '../../components/ui/Button'
 import { EmptyState } from '../../components/ui/EmptyState'
@@ -151,6 +151,19 @@ export function TasksPage() {
     },
     [dueScope, relatedKey, status, tasks]
   )
+
+  useEffect(() => {
+    const selected = focusTaskId
+      ? visible.filter((task) => task.id === focusTaskId).map((task) => ({ type: 'task', id: task.id, label: task.title, href: `/tasks?focus=${encodeURIComponent(task.id)}`, revision: task.revision }))
+      : []
+    applicationContextStore.publish({
+      workspace: 'tasks',
+      route: `${window.location.pathname}${window.location.search}`,
+      visibleFilters: { status, dueScope, relatedKey, sort: 'dueSortKey-asc' },
+      sort: 'dueSortKey-asc',
+      selected
+    })
+  }, [dueScope, focusTaskId, relatedKey, status, visible])
 
   useEffect(() => {
     if (!focusTaskId || !visible.some((task) => task.id === focusTaskId)) {

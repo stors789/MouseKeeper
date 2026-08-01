@@ -20,7 +20,7 @@ import {
   useState,
   type ChangeEvent
 } from 'react'
-import { APPLICATION_EVENT_NAMES, readApplicationViewCommand, viewCommandFromEvent } from '../../application'
+import { APPLICATION_EVENT_NAMES, applicationContextStore, readApplicationViewCommand, viewCommandFromEvent } from '../../application'
 import { appDatabase, appService } from '../../app/runtime'
 import {
   BACKUP_TABLE_NAMES,
@@ -145,6 +145,15 @@ export function DataPage() {
     globalThis.addEventListener(APPLICATION_EVENT_NAMES.view, handleView)
     return () => globalThis.removeEventListener(APPLICATION_EVENT_NAMES.view, handleView)
   }, [])
+
+  useEffect(() => {
+    applicationContextStore.publish({
+      workspace: 'data',
+      route: `${window.location.pathname}${window.location.search}`,
+      visibleFilters: { tab },
+      selected: []
+    })
+  }, [tab])
 
   const inventory = useLiveQuery(async () => {
     const [

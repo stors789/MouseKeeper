@@ -11,11 +11,21 @@
 
 test:e2e 会先执行生产构建，再用 preview 服务运行 Desktop Chrome 和 Pixel 7 Chromium 项目。失败时保存 trace，失败页面截图；CI 可重试两次，本地不重试。
 
+全局 V8 coverage 门禁为 statements 70%、branches 55%、functions 70%、lines 70%。门禁低于当前实测值，用于阻止无意回退，不代表每个高风险模块都只需达到该比例。
+
 ## 2. 当前自动化覆盖
 
 ### Vitest
 
-当前 11 个测试文件、67 个测试覆盖：
+当前 23 个测试文件、195 个测试覆盖；相对功能分支开始前的 67 个测试新增 128 个。除原有业务、备份、CSV 与组件覆盖外，还包括：
+
+- 69 个基线应用 capability 与 8 个 Agent 设置 capability 的唯一注册、递归 runtime JSON Schema、Service bridge、视图/导航/文件适配器和结果契约；
+- 288 条确定性自然语言契约案例，其中 `CAP-001`～`CAP-106` 与能力审计逐行一一对应，并验证完整参数 schema、风险与恢复策略；
+- 9 条使用生产 Registry、MouseKeeperService、Dexie 与 RecoveryManager 的真实执行评测，覆盖查询、创建、依赖复合工作流、偏好、错误修正、CSV、JSON 全库替换、永久删除和 failed-but-mutated 撤回；
+- OpenAI Responses、兼容 Responses、兼容 Chat Completions 的请求映射、SSE/JSONL、流式 delta、超时/停止、错误分类、模型列表和三种上下文策略；
+- 修改前惰性一致快照、逐行/完整恢复点、冲突撤回、偏好恢复和 200 条历史上限。
+
+原有领域覆盖继续包括：
 
 - 严格日历日期、当地时间、年龄、周龄、未来生日和 IANA 时区投影；
 - 活动耳标唯一、幂等重放、revision、容量确认和活动笼位唯一；
@@ -33,21 +43,22 @@ fake-indexeddb 不能证明真实浏览器配额、Service Worker、下载和多
 
 ### Playwright
 
-e2e/app.spec.ts 的 11 个逻辑场景映射到两个项目。最近一次完整执行结果记录在 agent-notes/final-test-report.md。
+e2e/app.spec.ts 的 12 个逻辑场景映射到两个项目。当前功能分支最近一次完整执行为 16 passed、8 条按项目条件 skipped、0 failed；最终 HEAD 的独立结果记录在 `agent-notes/llm-agent/11_final_regression_review.md`。
 
 覆盖场景：
 
 1. 九个工作区首次打开、无 console/page error、无整页横向溢出、切换深色主题；
 2. 未保存小鼠表单离开时取消/确认；
 3. 全局搜索打开后聚焦输入，Escape 关闭后恢复到触发按钮；
-4. Pixel 7 的批量建档、示例数据、快速称重和笼位成员子路由；
-5. 建笼、建鼠并初始分笼、记录体重、创建关联任务（桌面和 Pixel 7 都执行）；
-6. 编辑、搜索、性别筛选、批量状态、批量转笼、软删除、回收站恢复、刷新持久化；
-7. 父母、繁育组合、窝和原子后代；
-8. 体重趋势、一般事件、实验与组、加入小鼠、完成任务和跨模块历史；
-9. 示例数据、JSON 下载、损坏备份 UI 拒绝、修改数据、上传原备份、确认恢复和恢复后计数；
-10. CSV 一行有效/一行错误预览、部分成功导入和五类 CSV 下载；
-11. 已由 Service Worker 控制后，离线打开此前未访问的设置工作区。
+4. Agent 桌面/Pixel 7 页面上下文、长无断点文本、完整模型设置、JSONL 保存与刷新后持久化；
+5. Pixel 7 的批量建档、示例数据、快速称重和笼位成员子路由；
+6. 建笼、建鼠并初始分笼、记录体重、创建关联任务（桌面和 Pixel 7 都执行）；
+7. 编辑、搜索、性别筛选、批量状态、批量转笼、软删除、回收站恢复、刷新持久化；
+8. 父母、繁育组合、窝和原子后代；
+9. 体重趋势、一般事件、实验与组、加入小鼠、完成任务和跨模块历史；
+10. 示例数据、JSON 下载、损坏备份 UI 拒绝、修改数据、上传原备份、确认恢复和恢复后计数；
+11. CSV 一行有效/一行错误预览、部分成功导入和五类 CSV 下载；
+12. 已由 Service Worker 控制后，离线打开此前未访问的设置工作区。
 
 移动项目跳过桌面专属的下载、文件上传、密集批量、繁育/实验长流程和离线重复检查；桌面项目跳过只针对窄屏的子路由检查。这些是按项目分工的跳过，不是运行失败。
 
@@ -56,20 +67,22 @@ e2e/app.spec.ts 的 11 个逻辑场景映射到两个项目。最近一次完整
 | 需求 | 主要证据 |
 |---|---|
 | 首次启动/工作区 | Playwright 场景 1 |
-| 建笼、建鼠、初始分笼 | 场景 4 + service 测试 |
-| 编辑、搜索、筛选、批量状态/转笼 | 场景 5 + service 测试 |
-| 繁育、窝、后代 | 场景 6 + pedigree/service 测试 |
-| 体重、趋势、事件 | 场景 4/7 + Weight/Event 原子测试 |
-| 实验与分组 | 场景 7 + exclusion/replay 测试 |
-| 任务创建/完成 | 场景 4/7 |
-| JSON 导出/恢复 | 场景 8 + backup 测试 |
+| 建笼、建鼠、初始分笼 | 场景 6 + service 测试 |
+| 编辑、搜索、筛选、批量状态/转笼 | 场景 7 + service 测试 |
+| 繁育、窝、后代 | 场景 8 + pedigree/service 测试 |
+| 体重、趋势、事件 | 场景 6/9 + Weight/Event 原子测试 |
+| 实验与分组 | 场景 9 + exclusion/replay 测试 |
+| 任务创建/完成 | 场景 6/9 |
+| JSON 导出/恢复 | 场景 10 + backup 测试 |
 | 损坏备份拒绝 | backup.test.ts |
-| CSV 预览/部分成功/导出 | 场景 9 + import-export 测试 |
-| 软删除/恢复/永久删除 | 场景 5 + permanent-delete 测试 |
-| 刷新保留 | 场景 5 |
-| 手机主要流程 | 场景 1/3/4 的 Pixel 7 项目 |
+| CSV 预览/部分成功/导出 | 场景 11 + import-export 测试 |
+| 软删除/恢复/永久删除 | 场景 7 + permanent-delete 测试 |
+| 刷新保留 | 场景 7 |
+| 手机主要流程 | 场景 1/4/5/6 的 Pixel 7 项目 |
 | 深色/无横向溢出 | 场景 1/3 |
-| PWA 离线 | 场景 10 |
+| PWA 离线 | 场景 12 |
+| Agent/Provider 设置/移动端 | 场景 4 + provider/orchestrator 测试 |
+| Agent 整命令恢复 | execution eval + recovery 测试 |
 
 ## 4. 手工/专项检查
 

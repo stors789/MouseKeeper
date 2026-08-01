@@ -1,7 +1,9 @@
 import { createCoreCapabilityRegistry } from '../../application'
 import { createMouseKeeperDatabase, type MouseKeeperDatabase } from '../../db'
 import { MouseKeeperService } from '../../services'
+import { ProviderClient } from '../provider/client'
 import { createDefaultProviderSettings } from '../provider/defaults'
+import { SecretStore } from '../provider/secret-store'
 import type { NormalizedLLMRequest, NormalizedLLMResult, NormalizedToolCall } from '../provider/types'
 import { AgentDatabase } from '../recovery/database'
 import { RecoveryManager } from '../recovery/recovery-manager'
@@ -211,5 +213,91 @@ describe('AgentOrchestrator', () => {
     const result = await orchestrator(model).run(runInput('停止'), controller.signal)
     expect(result.status).toBe('failed')
     expect(model.requests).toHaveLength(0)
+  })
+
+  it('forwards provider text deltas as live progress without treating them as completion', async () => {
+    const model: AgentModelClient = {
+      generate(_profile, _preset, _input, _signal, onEvent) {
+        onEvent?.({ type: 'response-started', id: 'stream-1' })
+        onEvent?.({ type: 'text-delta', delta: '正在' })
+        onEvent?.({ type: 'text-delta', delta: '处理' })
+        return Promise.resolve({
+          id: 'stream-1',
+          text: '正在处理',
+          toolCalls: [],
+          effective: { requested: settings.presets[0]!, omitted: [] }
+        })
+      }
+    }
+    const progress: string[] = []
+    const result = await orchestrator(model).run(runInput('流式回答'), undefined, {
+      onProgress: (event) => {
+        if (event.type === 'text-delta') progress.push(event.text)
+      }
+    })
+    expect(progress).toEqual(['正在', '正在处理'])
+    expect(result).toMatchObject({ status: 'succeeded', text: '正在处理' })
+  })
+
+  it.each([
+    ['drop-oldest', 'current-only'],
+    ['summarize-then-trim', 'local-summary'],
+    ['fail', 'fails-before-fetch']
+  ] as const)('keeps a complete tool turn in session so %s is applied by the next real ProviderClient request', async (strategy, expectation) => {
+    const bodies: Array<Record<string, unknown>> = []
+    let requestIndex = 0
+    const fakeFetch = ((_url: string | URL | Request, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+      bodies.push(JSON.parse(init.body) as Record<string, unknown>)
+      requestIndex += 1
+      if (requestIndex === 1) {
+        return Promise.resolve(new Response(JSON.stringify({
+          id: 'provider-tool',
+          status: 'completed',
+          output: [{
+            type: 'function_call',
+            call_id: `create-${strategy}`,
+            name: 'execute_capability',
+            arguments: JSON.stringify({
+              capabilityId: 'cage.create',
+              input: { cageNumber: `CTX-${strategy}`, maxCapacity: 3 }
+            })
+          }]
+        })))
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        id: `provider-final-${requestIndex}`,
+        status: 'completed',
+        output: [{ type: 'message', content: [{ type: 'output_text', text: requestIndex === 2 ? '第一条完成' : '第二条完成' }] }]
+      })))
+    }) as typeof fetch
+    const client = new ProviderClient(new SecretStore(undefined, undefined), fakeFetch)
+    const agent = orchestrator(client)
+    const first = runInput('创建测试笼位')
+    first.sessionId = `context-${strategy}`
+    first.preset = { ...first.preset, historyLimit: 4, contextStrategy: strategy }
+    await expect(agent.run(first)).resolves.toMatchObject({ status: 'succeeded' })
+
+    const second = { ...runInput('检查刚才的结果'), sessionId: first.sessionId, preset: first.preset }
+    const result = await agent.run(second)
+    if (expectation === 'fails-before-fetch') {
+      expect(result.status).toBe('failed')
+      expect(result.error).toContain('超过本地上限 4')
+      expect(bodies).toHaveLength(2)
+      return
+    }
+
+    expect(result.status).toBe('succeeded')
+    expect(bodies).toHaveLength(3)
+    const nextInput = JSON.stringify(bodies[2]?.input)
+    if (expectation === 'current-only') {
+      expect(nextInput).toContain('检查刚才的结果')
+      expect(nextInput).not.toContain('create-')
+      expect(nextInput).not.toContain('第一条完成')
+    } else {
+      expect(nextInput).toContain('本地历史摘要')
+      expect(nextInput).toContain(`create-${strategy}`)
+      expect(nextInput).toContain('检查刚才的结果')
+    }
   })
 })

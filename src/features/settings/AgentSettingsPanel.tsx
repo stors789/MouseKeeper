@@ -305,6 +305,12 @@ export function AgentSettingsPanel() {
               <Field id="agent-org" label="Organization"><Input value={profile.organization ?? ''} onChange={(event) => updateProfile({ organization: event.target.value || undefined })} /></Field>
               <Field id="agent-project" label="Project"><Input value={profile.project ?? ''} onChange={(event) => updateProfile({ project: event.target.value || undefined })} /></Field>
             </div>
+            <Field id="agent-stream-dialect" label="流式响应格式" description="SSE 用于标准 OpenAI 事件；JSONL 每行一个 JSON，最后一行无需换行。">
+              <Select value={profile.streamDialect} options={[
+                { value: 'openai-sse', label: 'OpenAI SSE' },
+                { value: 'jsonl', label: 'JSONL' }
+              ]} onValueChange={(value) => updateProfile({ streamDialect: value as ProviderProfile['streamDialect'] })} />
+            </Field>
             <Field id="agent-headers" label="自定义请求头 JSON" description='格式：[ { "name": "X-Tenant", "value": "lab", "secret": false } ]。秘密值保存后会从文本中移除。'><Textarea rows={7} value={headersJson} onChange={(event) => setHeadersJson(event.target.value)} /></Field>
             <Button size="small" variant="secondary" onClick={saveHeaders}>保存请求头</Button>
             <label className="agent-check"><input type="checkbox" checked={profile.directBrowserRiskAccepted} onChange={(event) => updateProfile({ directBrowserRiskAccepted: event.target.checked })} /><span>我了解浏览器直连密钥的风险</span></label>
@@ -349,10 +355,10 @@ export function AgentSettingsPanel() {
             <Field id="agent-retries" label="网络重试次数" required><Input min={0} max={5} type="number" value={preset.retries} onChange={(event) => updatePreset({ retries: Number(event.target.value) })} /></Field>
             <Field id="agent-history" label="保留历史消息" required><Input min={2} max={100} type="number" value={preset.historyLimit} onChange={(event) => updatePreset({ historyLimit: Number(event.target.value) })} /></Field>
           </div>
-          <Field id="agent-context-strategy" label="上下文长度策略" required><Select value={preset.contextStrategy} options={[
+          <Field id="agent-context-strategy" label="本地上下文超限策略" required description="按完整用户/助手/工具轮次处理，不会额外调用收费模型。"><Select value={preset.contextStrategy} options={[
             { value: 'drop-oldest', label: '丢弃最旧完整轮次' },
             { value: 'fail', label: '超限时报错' },
-            { value: 'summarize-then-trim', label: '摘要后裁剪' }
+            { value: 'summarize-then-trim', label: '本地确定性摘录后裁剪' }
           ]} onValueChange={(value) => updatePreset({ contextStrategy: value as LLMPreset['contextStrategy'] })} /></Field>
           <div className="agent-settings__toggles">
             <label className="agent-check"><input type="checkbox" checked={preset.stream} onChange={(event) => updatePreset({ stream: event.target.checked })} /><span>流式输出</span></label>

@@ -139,4 +139,30 @@ describe('CapabilityRegistry', () => {
     ).rejects.toThrow('缺少必要参数 cageNumber')
     expect(await database.cages.count()).toBe(0)
   })
+
+  it('recursively validates types, formats, bounds, array items and additional properties with stable paths', async () => {
+    await expect(registry.execute(
+      'mouse.create.batch',
+      { entries: [{ strain: 'C57BL/6J', sex: 'female', birthDate: '2026-02-30', unexpected: true }] },
+      context('invalid-nested')
+    )).rejects.toThrow('$.entries[0].birthDate')
+    await expect(registry.execute(
+      'query.search',
+      { query: 'mouse', limit: 'many' },
+      context('invalid-type')
+    )).rejects.toThrow('$.limit')
+    await expect(registry.execute(
+      'query.search',
+      { query: 'mouse', limit: 1, extra: true },
+      context('invalid-extra')
+    )).rejects.toThrow('$.extra')
+  })
+
+  it('rejects unknown generic filter operators instead of returning over-broad results', async () => {
+    await expect(registry.execute(
+      'query.entities',
+      { entityType: 'cage', filters: { room: { typoContains: 'south' } } },
+      context('invalid-filter')
+    )).rejects.toThrow('$.filters.room.typoContains')
+  })
 })

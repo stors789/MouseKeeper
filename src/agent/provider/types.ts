@@ -137,6 +137,8 @@ export type ProviderEvent =
   | { type: 'response-completed'; result: NormalizedLLMResult }
   | { type: 'response-failed'; error: ProviderError }
 
+export type ProviderEventListener = (event: ProviderEvent) => void
+
 export type ProviderErrorKind =
   | 'auth'
   | 'permission'

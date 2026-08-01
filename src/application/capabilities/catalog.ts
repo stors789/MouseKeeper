@@ -33,6 +33,17 @@ const localTime = {
 const revision = integerSchema('可选；省略时执行器读取最新 revision')
 const stringArray = arraySchema(stringSchema())
 const jsonObject = objectSchema({}, [], undefined, true)
+const filterScalar = { type: ['string', 'number', 'boolean', 'null'] } satisfies JsonSchema
+const filterOperator = objectSchema({
+  eq: filterScalar,
+  in: { type: 'array', items: filterScalar, minItems: 1 },
+  contains: filterScalar,
+  gte: filterScalar,
+  lte: filterScalar
+})
+const entityFilters = objectSchema({}, [], '字段条件；操作符仅支持 eq、in、contains、gte、lte', {
+  oneOf: [filterScalar, filterOperator]
+})
 
 const mouseFields = {
   earTag: optionalStringSchema(),
@@ -167,7 +178,7 @@ export const CORE_CAPABILITY_DESCRIPTORS: readonly CapabilityDescriptor[] = [
           'experiment', 'experimentGroup', 'experimentAssignment', 'mouseEvent',
           'weightRecord', 'task', 'tag', 'activityLog', 'savedView', 'backupMetadata'
         ]),
-        filters: jsonObject,
+        filters: entityFilters,
         text: optionalStringSchema(),
         includeDeleted: booleanSchema(),
         sortBy: optionalStringSchema(),

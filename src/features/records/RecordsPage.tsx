@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Activity, NotebookPen, Scale, Search, X } from 'lucide-react'
 import { Link } from 'wouter'
-import { APPLICATION_EVENT_NAMES, readApplicationViewCommand, viewCommandFromEvent } from '../../application'
+import { APPLICATION_EVENT_NAMES, applicationContextStore, readApplicationViewCommand, viewCommandFromEvent } from '../../application'
 import { Button, buttonClassName } from '../../components/ui/Button'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { Input } from '../../components/ui/Input'
@@ -177,6 +177,16 @@ export function RecordsPage() {
     filteredWeights.length,
     tab
   ])
+
+  useEffect(() => {
+    const mouse = mouseFilter ? data?.mouseById.get(mouseFilter) : undefined
+    applicationContextStore.publish({
+      workspace: 'records',
+      route: `${window.location.pathname}${window.location.search}`,
+      visibleFilters: { tab, query, mouseId: mouseFilter || undefined },
+      selected: mouseFilter ? [{ type: 'mouse', id: mouseFilter, label: mouse ? mouseDisplayLabel(mouse) : mouseFilter, href: `/mice/${encodeURIComponent(mouseFilter)}`, revision: mouse?.revision }] : []
+    })
+  }, [data?.mouseById, mouseFilter, query, tab])
 
   return (
     <div className="feature-page">

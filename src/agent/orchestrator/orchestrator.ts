@@ -9,6 +9,25 @@ interface SessionState {
   recent: EntityReference[]
 }
 
+export function retainCompleteSessionTurns(
+  messages: readonly NormalizedMessage[],
+  limit: number
+): NormalizedMessage[] {
+  const turns: NormalizedMessage[][] = []
+  for (const message of messages) {
+    if (message.role === 'user' || turns.length === 0) turns.push([message])
+    else turns.at(-1)!.push(message)
+  }
+  const kept: NormalizedMessage[][] = []
+  let count = 0
+  for (const turn of turns.toReversed()) {
+    if (kept.length > 0 && count + turn.length > limit) break
+    kept.unshift(turn)
+    count += turn.length
+  }
+  return structuredClone((kept.length > 0 ? kept : turns.slice(-1)).flat())
+}
+
 function serializeToolResult(value: unknown): string {
   const serialized = JSON.stringify(value)
   if (serialized.length <= 48_000) return serialized
@@ -91,6 +110,10 @@ export class AgentOrchestrator {
         })
       } else if (call.name === 'execute_capability') {
         const id = stringArgument(call.arguments.capabilityId)
+        const capability = this.registry.get(id)
+        if (capability?.descriptor.modifiesData) {
+          await this.recovery.prepareMutation(token)
+        }
         const capabilityInput = call.arguments.input
         const result = await this.registry.execute(id, capabilityInput, {
           actor: 'llm',
@@ -165,6 +188,7 @@ export class AgentOrchestrator {
       for (rounds = 1; rounds <= input.preset.maxToolRounds; rounds += 1) {
         signal?.throwIfAborted()
         this.progress(options, { type: 'thinking', round: rounds })
+        let streamedText = ''
         const response = await this.model.generate(
           input.profile,
           input.preset,
@@ -174,7 +198,12 @@ export class AgentOrchestrator {
             tools: this.registry.agentTools(),
             previousResponseId: lastResponseId
           },
-          signal
+          signal,
+          (event) => {
+            if (event.type !== 'text-delta') return
+            streamedText += event.delta
+            this.progress(options, { type: 'text-delta', delta: event.delta, text: streamedText })
+          }
         )
         lastResponseId = response.id
         messages.push({
@@ -209,7 +238,7 @@ export class AgentOrchestrator {
       }
       const affected = uniqueAffected(results)
       const capabilityIds = results.map((result) => result.capabilityId)
-      const forceFullBackup = capabilityIds.some((id) => {
+      const forceFullBackup = traces.some(({ capabilityId: id }) => {
         const policy = this.registry.get(id)?.descriptor.recovery
         return policy === 'full-backup'
       })
@@ -220,7 +249,11 @@ export class AgentOrchestrator {
         summary: finalText || results.map((result) => result.summary).join('；') || '命令已处理',
         forceFullBackup
       })
-      session.messages = messages.slice(-Math.max(2, input.preset.historyLimit))
+      const requestedHistory = Number.isFinite(input.preset.historyLimit)
+        ? Math.max(2, input.preset.historyLimit)
+        : 20
+      const sessionCapacity = Math.min(400, Math.max(40, requestedHistory * 4))
+      session.messages = retainCompleteSessionTurns(messages, sessionCapacity)
       session.recent = affected.slice(-30)
       this.#sessions.set(input.sessionId, session)
       this.progress(options, { type: 'completed', commandRun })
@@ -241,8 +274,8 @@ export class AgentOrchestrator {
         traces,
         summary: finalText || undefined,
         error: message,
-        forceFullBackup: results.some((result) =>
-          this.registry.get(result.capabilityId)?.descriptor.recovery === 'full-backup'
+        forceFullBackup: traces.some(({ capabilityId }) =>
+          this.registry.get(capabilityId)?.descriptor.recovery === 'full-backup'
         )
       })
       this.progress(options, { type: 'failed', message, commandRun })

@@ -1,6 +1,6 @@
 import { buildGenerationRequest, buildModelsRequest } from './request-builders'
-import { parseChatJson, parseOpenAiStream, parseResponsesJson } from './parsers'
-import type { BuiltProviderRequest, ConnectionReport, LLMPreset, ModelInfo, NormalizedLLMRequest, NormalizedLLMResult, ProviderProfile } from './types'
+import { parseChatJson, parseProviderStream, parseResponsesJson } from './parsers'
+import type { BuiltProviderRequest, ConnectionReport, LLMPreset, ModelInfo, NormalizedLLMRequest, NormalizedLLMResult, ProviderEventListener, ProviderProfile } from './types'
 import { ProviderError } from './types'
 import type { SecretStore } from './secret-store'
 
@@ -63,9 +63,10 @@ async function wait(ms: number, signal?: AbortSignal): Promise<void> {
 async function send(
   request: BuiltProviderRequest,
   options: { timeoutMs: number; retries: number; signal?: AbortSignal; fetchImpl: FetchLike }
-): Promise<Response> {
+): Promise<{ response: Response; signal: AbortSignal; dispose: () => void }> {
   for (let attempt = 0; ; attempt += 1) {
     const timeout = combineSignal(options.signal, options.timeoutMs)
+    let keepSignalAlive = false
     try {
       const response = await options.fetchImpl(request.url, {
         method: request.method,
@@ -74,7 +75,10 @@ async function send(
         signal: timeout.signal,
         redirect: 'error'
       })
-      if (response.ok) return response
+      if (response.ok) {
+        keepSignalAlive = true
+        return { response, signal: timeout.signal, dispose: timeout.dispose }
+      }
       const body = await response.text()
       const error = classifyStatus(response.status, body, response.headers.get('x-request-id') ?? undefined)
       if (!error.options.retryable || attempt >= options.retries) throw error
@@ -89,7 +93,7 @@ async function send(
         throw new ProviderError('network-or-cors', '无法连接 Provider；请检查网络、TLS、CORS 和地址', { retryable: true })
       }
     } finally {
-      timeout.dispose()
+      if (!keepSignalAlive) timeout.dispose()
     }
     await wait(Math.min(250 * 2 ** attempt, 2_000), options.signal)
   }
@@ -105,33 +109,50 @@ export class ProviderClient {
     profile: ProviderProfile,
     preset: LLMPreset,
     input: NormalizedLLMRequest,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onEvent?: ProviderEventListener
   ): Promise<NormalizedLLMResult> {
     const request = buildGenerationRequest(profile, preset, input, this.secrets)
-    const response = await send(request, {
+    const sent = await send(request, {
       timeoutMs: preset.timeoutMs,
       retries: preset.retries,
       signal,
       fetchImpl: this.fetchImpl
     })
-    if (preset.stream && profile.capabilities.streaming !== 'unsupported') {
-      return parseOpenAiStream(response, profile.protocol, request.effective)
+    try {
+      if (preset.stream && profile.capabilities.streaming !== 'unsupported') {
+        return await parseProviderStream(sent.response, profile.protocol, request.effective, profile.streamDialect, onEvent)
+      }
+      const value: unknown = await sent.response.json()
+      return profile.protocol === 'compatible-chat-completions'
+        ? parseChatJson(value, request.effective)
+        : parseResponsesJson(value, request.effective)
+    } catch (error) {
+      if (error instanceof ProviderError) throw error
+      if (signal?.aborted) throw new ProviderError('aborted', '请求已停止')
+      if (sent.signal.reason instanceof DOMException && sent.signal.reason.name === 'TimeoutError') {
+        throw new ProviderError('timeout', 'Provider 请求超时', { retryable: true })
+      }
+      throw error
+    } finally {
+      sent.dispose()
     }
-    const value: unknown = await response.json()
-    return profile.protocol === 'compatible-chat-completions'
-      ? parseChatJson(value, request.effective)
-      : parseResponsesJson(value, request.effective)
   }
 
   async listModels(profile: ProviderProfile, signal?: AbortSignal): Promise<ModelInfo[]> {
     const request = buildModelsRequest(profile, this.secrets)
-    const response = await send(request, {
+    const sent = await send(request, {
       timeoutMs: 20_000,
       retries: 1,
       signal,
       fetchImpl: this.fetchImpl
     })
-    const value: unknown = await response.json()
+    let value: unknown
+    try {
+      value = await sent.response.json()
+    } finally {
+      sent.dispose()
+    }
     if (!value || typeof value !== 'object') throw new ProviderError('protocol', '模型列表格式无效')
     const record = value as Record<string, unknown>
     const items = Array.isArray(record.data)

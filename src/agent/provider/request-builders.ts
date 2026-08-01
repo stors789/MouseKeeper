@@ -37,19 +37,67 @@ export function joinProviderUrl(baseUrl: string, path: string): string {
   return endpoint.toString()
 }
 
-function trimCompleteTurns(messages: readonly NormalizedMessage[], limit: number): NormalizedMessage[] {
-  if (messages.length <= limit) return structuredClone([...messages])
+function completeTurns(messages: readonly NormalizedMessage[]): NormalizedMessage[][] {
   const turns: NormalizedMessage[][] = []
   for (const message of messages) {
     if (message.role === 'user' || turns.length === 0) turns.push([message])
     else turns.at(-1)!.push(message)
   }
+  return turns
+}
+
+function trimCompleteTurns(messages: readonly NormalizedMessage[], limit: number): NormalizedMessage[] {
+  if (messages.length <= limit) return structuredClone([...messages])
+  const turns = completeTurns(messages)
   const kept: NormalizedMessage[] = []
   for (const turn of turns.toReversed()) {
     if (kept.length > 0 && kept.length + turn.length > limit) break
     kept.unshift(...turn)
   }
   return structuredClone(kept.length > 0 ? kept : turns.at(-1) ?? [])
+}
+
+function localHistorySummary(turns: readonly NormalizedMessage[][]): NormalizedMessage {
+  const lines = turns.map((turn, index) => {
+    const parts = turn.map((message) => {
+      const calls = message.toolCalls?.map((call) => call.name).join(', ')
+      const label = message.role === 'user' ? '用户' : message.role === 'assistant' ? '助手' : `工具 ${message.toolCallId ?? ''}`
+      const excerpt = message.content.replace(/\s+/g, ' ').trim().slice(0, 160)
+      return `${label}${calls ? `（调用 ${calls}）` : ''}: ${excerpt || '（无文本）'}`
+    })
+    return `较早轮次 ${index + 1}: ${parts.join(' | ')}`
+  })
+  return {
+    role: 'user',
+    content: `[本地历史摘要：这是确定性摘录，未调用额外模型，可能省略细节]\n${lines.join('\n').slice(0, 4_000)}`
+  }
+}
+
+export function applyContextStrategy(
+  messages: readonly NormalizedMessage[],
+  limit: number,
+  strategy: LLMPreset['contextStrategy']
+): NormalizedMessage[] {
+  if (messages.length <= limit) return structuredClone([...messages])
+  if (strategy === 'fail') {
+    throw new Error(`上下文包含 ${messages.length} 条消息，超过本地上限 ${limit}；请提高上限或改用裁剪策略`)
+  }
+  if (strategy === 'drop-oldest') return trimCompleteTurns(messages, limit)
+
+  const turns = completeTurns(messages)
+  const keptTurns: NormalizedMessage[][] = []
+  let keptCount = 0
+  for (const turn of turns.toReversed()) {
+    if (keptTurns.length > 0 && keptCount + turn.length > Math.max(1, limit - 1)) break
+    keptTurns.unshift(turn)
+    keptCount += turn.length
+  }
+  const droppedCount = turns.length - keptTurns.length
+  if (droppedCount <= 0) return structuredClone(keptTurns.flat())
+  return structuredClone([
+    localHistorySummary(turns.slice(0, droppedCount)),
+    ...keptTurns.flat()
+  ])
 }
 
 function responseInput(messages: readonly NormalizedMessage[]): unknown[] {
@@ -202,7 +250,7 @@ export function buildGenerationRequest(
   secrets: SecretStore
 ): BuiltProviderRequest {
   if (!preset.model.trim()) throw new Error('尚未配置模型名称')
-  const messages = trimCompleteTurns(request.messages, preset.historyLimit)
+  const messages = applyContextStrategy(request.messages, preset.historyLimit, preset.contextStrategy)
   const instructions = [request.instructions, preset.systemPromptAppend].filter(Boolean).join('\n\n')
   const effective: EffectiveProviderSettings = { requested: structuredClone(preset), omitted: [] }
   const body: Record<string, unknown> = { model: preset.model }

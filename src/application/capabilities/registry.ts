@@ -1,4 +1,5 @@
 import type { CapabilityDescriptor, CapabilityExecutionContext, CapabilityExecutionResult, CapabilityHandler, CapabilitySearchOptions, CapabilityToolDefinition, RegisteredCapability } from './types'
+import { assertJsonSchema } from './schema'
 
 function normalize(value: string): string {
   return value.trim().toLocaleLowerCase()
@@ -7,14 +8,6 @@ function normalize(value: string): string {
 function assertObjectInput(value: unknown): asserts value is Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('能力参数必须是 JSON 对象')
-  }
-}
-
-function validateRequired(descriptor: CapabilityDescriptor, input: Record<string, unknown>): void {
-  for (const key of descriptor.inputSchema.required ?? []) {
-    if (input[key] === undefined || input[key] === null || input[key] === '') {
-      throw new Error(`${descriptor.id} 缺少必要参数 ${key}`)
-    }
   }
 }
 
@@ -70,7 +63,11 @@ export class CapabilityRegistry {
       throw new Error(`未知或不可用的能力：${id}`)
     }
     assertObjectInput(input)
-    validateRequired(entry.descriptor, input)
+    try {
+      assertJsonSchema(input, entry.descriptor.inputSchema)
+    } catch (error) {
+      throw new Error(`${entry.descriptor.id} 参数无效：${error instanceof Error ? error.message : String(error)}`)
+    }
     context.signal?.throwIfAborted()
     const result = await entry.handler.execute(input, context)
     context.signal?.throwIfAborted()

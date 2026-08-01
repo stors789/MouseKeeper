@@ -1,4 +1,12 @@
-import { objectSchema, stringSchema } from '../application/capabilities/schema'
+import {
+  arraySchema,
+  booleanSchema,
+  enumSchema,
+  integerSchema,
+  numberSchema,
+  objectSchema,
+  stringSchema
+} from '../application/capabilities/schema'
 import type { CapabilityDescriptor, CapabilityRegistry } from '../application'
 import type { ProviderClient } from './provider/client'
 import type { ProviderSettingsStore } from './provider/settings-store'
@@ -27,7 +35,27 @@ export const AGENT_SETTINGS_DESCRIPTORS: readonly CapabilityDescriptor[] = [
     id: 'settings.agent.get', name: '查看 Agent 设置', description: '查看 Provider、预设和 API Key 是否已配置的安全摘要；永不返回秘密原文。', kind: 'query', inputSchema: objectSchema({}), modifiesData: false, risk: 'read-only', recovery: 'none', service: 'ProviderSettingsStore'
   }),
   descriptor({
-    id: 'settings.agent.preset.update', name: '更新模型预设', description: '修改预设的模型、思考强度、生成参数、超时、工具轮次、历史或系统追加提示。', kind: 'command', inputSchema: objectSchema({ presetId: stringSchema(), patch: objectSchema({}, [], undefined, true) }, ['presetId', 'patch']), modifiesData: true, risk: 'reversible', recovery: 'row-diff', service: 'ProviderSettingsStore'
+    id: 'settings.agent.preset.update', name: '更新模型预设', description: '修改预设的模型、思考强度、生成参数、超时、工具轮次、历史或系统追加提示。', kind: 'command', inputSchema: objectSchema({
+      presetId: stringSchema(),
+      patch: objectSchema({
+        name: stringSchema(),
+        providerProfileId: stringSchema(),
+        model: stringSchema(),
+        reasoningEffort: stringSchema(),
+        temperature: { ...numberSchema(), minimum: 0, maximum: 2 },
+        topP: { ...numberSchema(), minimum: 0, maximum: 1 },
+        maxOutputTokens: { ...integerSchema(), minimum: 1, maximum: 1_000_000 },
+        timeoutMs: { ...integerSchema(), minimum: 1_000, maximum: 600_000 },
+        maxToolRounds: { ...integerSchema(), minimum: 1, maximum: 50 },
+        stream: booleanSchema(),
+        parallelToolCalls: booleanSchema(),
+        retries: { ...integerSchema(), minimum: 0, maximum: 5 },
+        historyLimit: { ...integerSchema(), minimum: 2, maximum: 100 },
+        contextStrategy: enumSchema(['fail', 'drop-oldest', 'summarize-then-trim']),
+        systemPromptAppend: stringSchema(),
+        providerParameters: objectSchema({}, [], 'Provider 特有 JSON 参数', true)
+      })
+    }, ['presetId', 'patch']), modifiesData: true, risk: 'reversible', recovery: 'row-diff', service: 'ProviderSettingsStore'
   }),
   descriptor({
     id: 'settings.agent.preset.default', name: '设置默认预设', description: '设置下一条 Agent 命令默认使用的模型预设。', kind: 'command', inputSchema: objectSchema({ presetId: stringSchema() }, ['presetId']), modifiesData: true, risk: 'reversible', recovery: 'row-diff', service: 'ProviderSettingsStore'
@@ -39,7 +67,40 @@ export const AGENT_SETTINGS_DESCRIPTORS: readonly CapabilityDescriptor[] = [
     id: 'settings.agent.preset.delete', name: '删除模型预设', description: '删除非唯一的模型预设；如果它是默认预设则自动选择另一个。', kind: 'command', inputSchema: objectSchema({ presetId: stringSchema() }, ['presetId']), modifiesData: true, risk: 'reversible', recovery: 'row-diff', service: 'ProviderSettingsStore'
   }),
   descriptor({
-    id: 'settings.agent.provider.update', name: '更新 Provider 配置', description: '修改 Provider 名称、协议、URL、路径、认证模式、普通请求头和能力声明；不能读取或设置 API Key。', kind: 'command', inputSchema: objectSchema({ profileId: stringSchema(), patch: objectSchema({}, [], undefined, true) }, ['profileId', 'patch']), modifiesData: true, risk: 'reversible', recovery: 'row-diff', service: 'ProviderSettingsStore'
+    id: 'settings.agent.provider.update', name: '更新 Provider 配置', description: '修改 Provider 名称、协议、URL、路径、认证模式、普通请求头和能力声明；不能读取或设置 API Key。', kind: 'command', inputSchema: objectSchema({
+      profileId: stringSchema(),
+      patch: objectSchema({
+        name: stringSchema(),
+        protocol: enumSchema(['openai-responses', 'compatible-responses', 'compatible-chat-completions']),
+        baseUrl: stringSchema(),
+        generationPath: stringSchema(),
+        modelsPath: stringSchema(),
+        authMode: enumSchema(['none', 'bearer', 'api-key-header']),
+        apiKeyHeader: stringSchema(),
+        organization: stringSchema(),
+        project: stringSchema(),
+        customHeaders: arraySchema(objectSchema({
+          id: stringSchema(),
+          name: stringSchema(),
+          value: stringSchema(),
+          secret: booleanSchema()
+        }, ['id', 'name', 'secret'])),
+        capabilities: objectSchema({
+          reasoning: enumSchema(['supported', 'unsupported', 'unknown']),
+          reasoningEfforts: arraySchema(stringSchema()),
+          temperature: enumSchema(['supported', 'unsupported', 'unknown']),
+          topP: enumSchema(['supported', 'unsupported', 'unknown']),
+          maxOutputTokens: enumSchema(['supported', 'unsupported', 'unknown']),
+          streaming: enumSchema(['supported', 'unsupported', 'unknown']),
+          parallelToolCalls: enumSchema(['supported', 'unsupported', 'unknown']),
+          modelListing: enumSchema(['supported', 'unsupported', 'unknown']),
+          strictTools: enumSchema(['supported', 'unsupported', 'unknown'])
+        }, ['reasoning', 'reasoningEfforts', 'temperature', 'topP', 'maxOutputTokens', 'streaming', 'parallelToolCalls', 'modelListing', 'strictTools']),
+        streamDialect: enumSchema(['openai-sse', 'jsonl']),
+        chatMaxTokensField: enumSchema(['max_completion_tokens', 'max_tokens']),
+        directBrowserRiskAccepted: booleanSchema()
+      })
+    }, ['profileId', 'patch']), modifiesData: true, risk: 'reversible', recovery: 'row-diff', service: 'ProviderSettingsStore'
   }),
   descriptor({
     id: 'settings.agent.models.list', name: '获取模型列表', description: '从 Provider 的模型接口读取模型 ID；接口不可用时不会阻止手动模型名。', kind: 'query', inputSchema: objectSchema({ profileId: stringSchema() }, ['profileId']), modifiesData: false, risk: 'read-only', recovery: 'none', service: 'ProviderClient.listModels'

@@ -14,7 +14,6 @@ import {
 } from 'lucide-react'
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -27,13 +26,14 @@ import type { AgentProgress, AgentRunResult } from '../../agent/orchestrator'
 import { providerSettingsStore } from '../../agent/provider/settings-store'
 import { secretStore } from '../../agent/provider/secret-store'
 import type { AgentCommandRun } from '../../agent/recovery'
-import { fileBroker, type EntityReference } from '../../application'
+import { applicationContextStore, fileBroker, type EntityReference } from '../../application'
 import { Alert } from '../../components/ui/Alert'
 import { Button } from '../../components/ui/Button'
 import { Select } from '../../components/ui/Select'
 import { StatusChip } from '../../components/ui/StatusChip'
 import { Textarea } from '../../components/ui/Textarea'
 import { readableError } from '../../lib/errors'
+import { commandCanUndo, commandHasChanges, commandStatusLabel, prependBoundedRun } from './run-presentation'
 
 interface RunView {
   commandRun: AgentCommandRun
@@ -95,6 +95,11 @@ export function AgentPage() {
     () => providerSettingsStore.snapshot(),
     () => providerSettingsStore.snapshot()
   )
+  const pageContext = useSyncExternalStore(
+    applicationContextStore.subscribe,
+    applicationContextStore.snapshot,
+    applicationContextStore.snapshot
+  )
   const [presetId, setPresetId] = useState(settings.defaultPresetId)
   const [prompt, setPrompt] = useState('')
   const [runs, setRuns] = useState<RunView[]>([])
@@ -105,9 +110,10 @@ export function AgentPage() {
   const [undoing, setUndoing] = useState<string>()
   const [fileBusy, setFileBusy] = useState<string>()
   const abortRef = useRef<AbortController | undefined>(undefined)
+  const activeExecutionRef = useRef<string | undefined>(undefined)
   const composerRef = useRef<HTMLTextAreaElement>(null)
-  const route = useMemo(() => contextRoute(), [])
-  const selected = useMemo(() => selectedFromRoute(route), [route])
+  const route = pageContext?.route ?? contextRoute()
+  const selected = pageContext ? [...pageContext.selected] : selectedFromRoute(route)
   const preset = settings.presets.find((item) => item.id === presetId) ?? settings.presets[0]
   const profile = settings.profiles.find((item) => item.id === preset?.providerProfileId)
   const configured = Boolean(profile && (
@@ -122,6 +128,7 @@ export function AgentPage() {
   }, [])
 
   const recordProgress = (progress: AgentProgress) => {
+    if (progress.type === 'text-delta') setLiveText(progress.text)
     if (progress.type === 'text') setLiveText(progress.text)
     if (progress.type === 'tool-started') {
       setLiveTraces((current) => [...current, progress.trace])
@@ -138,7 +145,9 @@ export function AgentPage() {
   const execute = async (text: string) => {
     if (!text.trim() || busy || !preset || !profile) return
     const controller = new AbortController()
+    const executionId = crypto.randomUUID()
     abortRef.current = controller
+    activeExecutionRef.current = executionId
     setBusy(true)
     setError(undefined)
     setLiveText('')
@@ -152,17 +161,23 @@ export function AgentPage() {
         context: {
           currentRoute: route,
           selected,
+          visibleFilters: pageContext?.visibleFilters,
           locale: navigator.language || 'zh-CN',
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           now: new Date().toISOString()
         }
-      }, controller.signal, { onProgress: recordProgress })
-      setRuns((current) => [{ commandRun: result.commandRun, result }, ...current.filter((item) => item.commandRun.id !== result.commandRun.id)])
+      }, controller.signal, {
+        onProgress: (progress) => {
+          if (activeExecutionRef.current === executionId) recordProgress(progress)
+        }
+      })
+      setRuns((current) => prependBoundedRun(current, { commandRun: result.commandRun, result }))
       if (result.status === 'failed') setError(result.error ?? 'Agent 命令没有完成')
       setPrompt('')
     } catch (runError) {
       setError(readableError(runError))
     } finally {
+      if (activeExecutionRef.current === executionId) activeExecutionRef.current = undefined
       abortRef.current = undefined
       setBusy(false)
       setLiveText('')
@@ -196,15 +211,16 @@ export function AgentPage() {
     }
   }
 
-  const chooseFile = async (event: ChangeEvent<HTMLInputElement>, requestId: string) => {
+  const chooseFile = async (event: ChangeEvent<HTMLInputElement>, requestId: string, originalPrompt: string) => {
     const file = event.target.files?.[0]
     if (!file) return
     setFileBusy(requestId)
     setError(undefined)
     try {
       const request = fileBroker.provide(requestId, file)
-      const capability = request.kind === 'backup-restore' ? 'data.backup.restore' : 'data.csv.import'
-      await execute(`我已通过用户手势选择文件“${file.name}”。继续上一项文件工作流：调用 ${capability}，fileRequestId 为 ${requestId}。完成后报告逐项结果。`)
+      const previewCapability = request.kind === 'backup-restore' ? 'data.backup.preview' : 'data.csv.preview'
+      const commitCapability = request.kind === 'backup-restore' ? 'data.backup.restore' : 'data.csv.import'
+      await execute(`原始指令是：“${originalPrompt}”。我已通过用户手势选择文件“${file.name}”。必须先调用 ${previewCapability}，fileRequestId 为 ${requestId}。预览通过后：若原始指令明确要求执行恢复或导入，立即用预览结果的 previewToken 调用 ${commitCapability}；若原始指令只要求选择、检查或预览，则显示预览后停止。`)
     } catch (fileError) {
       setError(readableError(fileError))
     } finally {
@@ -228,7 +244,8 @@ export function AgentPage() {
 
       <section className="agent-context-strip" aria-label="Agent 当前上下文">
         <span><strong>页面上下文</strong>{route}</span>
-        <span><strong>选中对象</strong>{selected[0] ? `${selected[0].type} · ${selected[0].id}` : '无'}</span>
+        <span><strong>当前筛选</strong>{pageContext ? `${pageContext.workspace} · ${Object.entries(pageContext.visibleFilters).filter(([, value]) => value !== undefined && value !== '' && value !== 'all').map(([key, value]) => `${key}=${String(value)}`).join('，') || '无筛选'}` : '无页面状态'}</span>
+        <span><strong>选中对象</strong>{selected.length ? selected.map((item) => `${item.type} · ${item.label ?? item.id}`).join('；') : '无'}</span>
         <label>
           <strong>模型预设</strong>
           <Select ariaLabel="Agent 模型预设" value={preset?.id ?? ''} options={settings.presets.map((item) => ({ value: item.id, label: `${item.name} · ${item.model}` }))} onValueChange={setPresetId} />
@@ -266,7 +283,7 @@ export function AgentPage() {
             <div className="agent-composer__footer">
               <span>Enter 执行 · Shift + Enter 换行 · ⌘/Ctrl + J 随时打开</span>
               {busy ? (
-                <Button variant="secondary" leadingIcon={<Square aria-hidden="true" size={14} />} onClick={() => abortRef.current?.abort()}>停止</Button>
+                <Button variant="secondary" leadingIcon={<Square aria-hidden="true" size={14} />} onClick={() => { activeExecutionRef.current = undefined; setLiveText(''); abortRef.current?.abort() }}>停止</Button>
               ) : (
                 <Button disabled={!configured || !prompt.trim()} leadingIcon={<Send aria-hidden="true" size={15} />} onClick={submit}>执行命令</Button>
               )}
@@ -305,8 +322,10 @@ export function AgentPage() {
           ) : (
             <div className="agent-run-list">
               {runs.map(({ commandRun, result }) => {
-                const canUndo = commandRun.status === 'succeeded' && (commandRun.changes.length > 0 || commandRun.preferenceChanges.length > 0)
+                const hasChanges = commandHasChanges(commandRun)
+                const canUndo = commandCanUndo(commandRun)
                 const fileRequests = result?.results.flatMap((item) => item.artifacts ?? []).filter((artifact) => artifact.kind === 'file-request') ?? []
+                const filePreviews = result?.results.filter((item) => item.capabilityId === 'data.backup.preview' || item.capabilityId === 'data.csv.preview') ?? []
                 const openTargets = result?.results.flatMap((item) => item.open ? [item.open] : []) ?? []
                 return (
                   <article className="agent-run-card" data-status={commandRun.status} key={commandRun.id}>
@@ -315,7 +334,7 @@ export function AgentPage() {
                         <span>{dateTime(commandRun.createdAt)} · {commandRun.model ?? '未知模型'}</span>
                         <h4>{commandRun.prompt}</h4>
                       </div>
-                      <StatusChip label={commandRun.status === 'succeeded' ? '已完成' : commandRun.status === 'undone' ? '已撤回' : commandRun.status === 'running' ? '运行中' : '失败'} tone={statusTone(commandRun)} icon={commandRun.status === 'succeeded' ? CheckCircle2 : commandRun.status === 'running' ? LoaderCircle : TriangleAlert} />
+                      <StatusChip label={commandStatusLabel(commandRun)} tone={statusTone(commandRun)} icon={commandRun.status === 'succeeded' ? CheckCircle2 : commandRun.status === 'running' ? LoaderCircle : TriangleAlert} />
                     </header>
                     <p className="agent-run-card__summary">{commandRun.summary ?? commandRun.error ?? '没有摘要'}</p>
 
@@ -325,11 +344,18 @@ export function AgentPage() {
 
                     {fileRequests.map((artifact) => {
                       const request = fileBroker.getRequest(artifact.id)
-                      return request?.status === 'waiting' ? <label className="agent-file-request" key={artifact.id}><FileUp aria-hidden="true" size={18} /><span><strong>{artifact.name}</strong><small>选择后自动继续这一工作流</small></span><span className="ui-button ui-button--primary ui-button--small">{fileBusy === artifact.id ? '处理中…' : '选择文件'}</span><input className="sr-only" disabled={busy || Boolean(fileBusy)} type="file" accept={request.accept} onChange={(event) => void chooseFile(event, artifact.id)} /></label> : null
+                      return request?.status === 'waiting' ? <label className="agent-file-request" key={artifact.id}><FileUp aria-hidden="true" size={18} /><span><strong>{artifact.name}</strong><small>选择后自动继续预览，并按原始指令决定是否提交</small></span><span className="ui-button ui-button--primary ui-button--small">{fileBusy === artifact.id ? '处理中…' : '选择文件'}</span><input className="sr-only" disabled={busy || Boolean(fileBusy)} type="file" accept={request.accept} onChange={(event) => void chooseFile(event, artifact.id, commandRun.prompt)} /></label> : null
                     })}
 
+                    {filePreviews.map((preview) => (
+                      <details className="agent-file-preview" key={`${preview.capabilityId}:${commandRun.id}`}>
+                        <summary>查看文件预览详情</summary>
+                        <pre>{JSON.stringify(preview.data, null, 2)}</pre>
+                      </details>
+                    ))}
+
                     <footer>
-                      <span>{recoveryLabel(commandRun)} · {commandRun.changes.length + commandRun.preferenceChanges.length} 项变化</span>
+                      <span>{commandRun.status === 'failed' && hasChanges ? '执行失败，但已记录可撤回变化' : recoveryLabel(commandRun)} · {commandRun.changes.length + commandRun.preferenceChanges.length} 项变化</span>
                       <div>
                         <Button size="small" variant="tertiary" leadingIcon={<Pencil aria-hidden="true" size={14} />} onClick={() => { setPrompt(commandRun.prompt); composerRef.current?.focus() }}>编辑重发</Button>
                         <Button size="small" variant="tertiary" disabled={busy} onClick={() => void execute(commandRun.prompt)}>重试</Button>
