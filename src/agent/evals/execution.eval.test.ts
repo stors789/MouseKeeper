@@ -89,7 +89,7 @@ describe('offline Agent execution evals with production registry and databases',
 
   it('records a view preference through the real extended handler and restores it on undo', async () => {
     const { orchestrator } = harness([
-      { text: '', calls: [toolCall('configure-view', 'view.configure', { workspace: 'mice', state: { sex: 'female', sortBy: 'birthDate' } })] },
+      { text: '', calls: [toolCall('configure-view', 'view.configure', { workspace: 'mice', state: { sex: 'female', sort: 'age-oldest' } })] },
       { text: '已应用视图。' }
     ])
     const result = await orchestrator.run(input('只看雌鼠，按出生日期排序'))

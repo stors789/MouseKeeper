@@ -1,6 +1,6 @@
 import { backupBlob, createRestorePreview, exportDatabaseBackup, restoreDatabaseBackup } from '../../backup'
 import { scanIntegrity, type MouseKeeperDatabase } from '../../db'
-import { normalizeText } from '../../domain'
+import { MOUSE_SEXES, MOUSE_STATUSES, normalizeText } from '../../domain'
 import { createCsvBlob, parseCsvPreview } from '../../import-export/csv'
 import { commitMouseImport } from '../../import-export/mouse-import-runner'
 import { suggestMouseFieldMapping, validateMouseImport, type MouseFieldMapping } from '../../import-export/mouse-import'
@@ -18,6 +18,45 @@ export const APPLICATION_EVENT_NAMES = {
   focusSearch: 'mousekeeper:application-focus-search',
   setTheme: 'mousekeeper:application-set-theme',
   view: 'mousekeeper:application-view-command'
+} as const
+
+const dateOrEmpty = {
+  oneOf: [
+    { type: 'string', format: 'date' },
+    { const: '' }
+  ]
+} as const
+
+const miceViewState = objectSchema({
+  query: stringSchema(),
+  status: enumSchema(['all', ...MOUSE_STATUSES]),
+  sex: enumSchema(['all', ...MOUSE_SEXES]),
+  strain: stringSchema(), genotype: stringSchema(), cageId: stringSchema(), tagId: stringSchema(), experimentId: stringSchema(),
+  birthFrom: dateOrEmpty,
+  birthTo: dateOrEmpty,
+  includeDeleted: { type: 'boolean' },
+  sort: enumSchema(['updated-desc', 'updated-asc', 'label-asc', 'strain-asc', 'age-youngest', 'age-oldest']),
+  viewMode: enumSchema(['table', 'cards'])
+})
+const recordsViewState = objectSchema({
+  tab: enumSchema(['events', 'weights', 'activity']),
+  query: stringSchema()
+})
+const tasksViewState = objectSchema({
+  status: enumSchema(['all', 'pending', 'completed', 'cancelled']),
+  dueScope: enumSchema(['all', 'today', 'upcoming', 'overdue']),
+  relatedKey: stringSchema('all 或 mouse:<id>、cage:<id>、experiment:<id>')
+})
+const dataViewState = objectSchema({ tab: enumSchema(['backup', 'import', 'export', 'recycle', 'sample']) })
+
+const viewConfigureSchema = {
+  type: 'object',
+  oneOf: [
+    objectSchema({ workspace: { const: 'mice' }, state: miceViewState }, ['workspace', 'state']),
+    objectSchema({ workspace: { const: 'records' }, state: recordsViewState }, ['workspace', 'state']),
+    objectSchema({ workspace: { const: 'tasks' }, state: tasksViewState }, ['workspace', 'state']),
+    objectSchema({ workspace: { const: 'data' }, state: dataViewState }, ['workspace', 'state'])
+  ]
 } as const
 
 function dispatch(name: string, detail: unknown): void {
@@ -56,8 +95,8 @@ export const EXTENDED_CAPABILITY_DESCRIPTORS: readonly CapabilityDescriptor[] = 
     kind: 'view', inputSchema: emptyObjectSchema, outputDescription: '搜索框已打开', reads: [], writes: [], modifiesData: false, supportsBatch: false, risk: 'view-only', recovery: 'none', service: 'ViewStateAdapter'
   }),
   descriptor({
-    id: 'view.configure', domain: 'views', name: '设置页面筛选排序和标签', description: '设置小鼠筛选/排序/视图、记录标签、任务范围或数据页标签；页面通过稳定视图事件接收。',
-    kind: 'view', inputSchema: objectSchema({ workspace: enumSchema(['mice', 'records', 'tasks', 'data']), state: objectSchema({}, [], undefined, true) }, ['workspace', 'state']), outputDescription: '已应用的视图状态', reads: [], writes: ['local view state'], modifiesData: true, supportsBatch: true, risk: 'reversible', recovery: 'row-diff', service: 'ViewStateAdapter'
+    id: 'view.configure', domain: 'views', name: '设置页面筛选排序和标签', description: '按工作区设置与页面组件完全一致的扁平视图状态；不接受嵌套 filters。',
+    kind: 'view', inputSchema: viewConfigureSchema, outputDescription: '已应用的视图状态', reads: [], writes: ['local view state'], modifiesData: true, supportsBatch: true, risk: 'reversible', recovery: 'row-diff', service: 'ViewStateAdapter'
   }),
   descriptor({
     id: 'settings.theme.set', domain: 'settings', name: '切换主题', description: '切换浅色、深色或跟随系统。',

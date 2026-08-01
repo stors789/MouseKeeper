@@ -102,14 +102,23 @@ describe('extended application capabilities', () => {
     globalThis.addEventListener(APPLICATION_EVENT_NAMES.view, listener)
     await registry.execute(
       'view.configure',
-      { workspace: 'mice', state: { filters: { sex: 'female' }, sort: 'age-oldest' } },
+      { workspace: 'mice', state: { sex: 'female', sort: 'age-oldest' } },
       context('view')
     )
     expect(JSON.parse(window.localStorage.getItem('mousekeeper:view-command:mice')!)).toEqual({
-      filters: { sex: 'female' },
+      sex: 'female',
       sort: 'age-oldest'
     })
     expect(listener).toHaveBeenCalled()
     globalThis.removeEventListener(APPLICATION_EVENT_NAMES.view, listener)
+  })
+
+  it('rejects view state fields that the target page cannot apply', async () => {
+    await expect(registry.execute(
+      'view.configure',
+      { workspace: 'mice', state: { filters: { sex: 'female' } } },
+      context('invalid-view')
+    )).rejects.toThrow('$.state.filters')
+    expect(window.localStorage.getItem('mousekeeper:view-command:mice')).toBeNull()
   })
 })
