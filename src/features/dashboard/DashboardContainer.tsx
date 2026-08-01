@@ -1,7 +1,15 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { appDatabase } from '../../app/runtime'
-import { formatInstant } from '../../lib/format'
-import { MOUSE_STATUS_LABELS } from '../../lib/labels'
+import { mouseDisplayLabel } from '../../domain'
+import {
+  formatInstant,
+  formatLocalDate
+} from '../../lib/format'
+import {
+  MOUSE_SEX_LABELS,
+  MOUSE_STATUS_LABELS,
+  TASK_PRIORITY_LABELS
+} from '../../lib/labels'
 import { loadDashboardSnapshot } from '../../queries/dashboard'
 import { DashboardPage } from './DashboardPage'
 import {
@@ -64,6 +72,33 @@ export function DashboardContainer() {
         count,
         tone: STATUS_TONES[status as keyof typeof STATUS_TONES]
       })),
+    sexComposition: Object.entries(snapshot.sexCounts)
+      .filter(([, count]) => count > 0)
+      .map(([sex, count]) => ({
+        id: sex,
+        label: MOUSE_SEX_LABELS[sex as keyof typeof MOUSE_SEX_LABELS],
+        count,
+        tone:
+          sex === 'male'
+            ? ('informative' as const)
+            : sex === 'female'
+              ? ('positive' as const)
+              : ('neutral' as const)
+      })),
+    strainComposition: snapshot.strainCounts.map((item, index) => ({
+      id: item.label,
+      label: item.label,
+      count: item.count,
+      tone: index === 0 ? ('informative' as const) : ('neutral' as const)
+    })),
+    ageComposition: snapshot.ageCounts
+      .filter((item) => item.count > 0)
+      .map((item) => ({
+        id: item.id,
+        label: item.label,
+        count: item.count,
+        tone: item.id === 'unknown' ? ('warning' as const) : ('neutral' as const)
+      })),
     recentActivity: snapshot.recentActivity.map((activity) => ({
       id: activity.id,
       title: activity.summary,
@@ -73,6 +108,21 @@ export function DashboardContainer() {
         activity.primaryEntityType,
         activity.primaryEntityId
       )
+    })),
+    recentMice: snapshot.recentMice.map((mouse) => ({
+      id: mouse.id,
+      label: mouseDisplayLabel(mouse),
+      description: `${mouse.strain}${mouse.genotype ? ` · ${mouse.genotype}` : ''} · 更新于 ${formatInstant(mouse.updatedAt)}`,
+      statusLabel: MOUSE_STATUS_LABELS[mouse.status],
+      statusTone: STATUS_TONES[mouse.status],
+      href: `/mice/${encodeURIComponent(mouse.id)}`
+    })),
+    upcomingTasks: snapshot.upcomingTasks.map((task) => ({
+      id: task.id,
+      title: task.title,
+      dueLabel: `${formatLocalDate(task.dueDate)}${task.dueTime ? ` ${task.dueTime}` : ''}`,
+      priorityLabel: `${TASK_PRIORITY_LABELS[task.priority]}优先级`,
+      href: `/tasks?focus=${encodeURIComponent(task.id)}`
     })),
     updatedAtLabel: `更新于 ${formatInstant(snapshot.generatedAt)}`
   }

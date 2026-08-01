@@ -33,11 +33,33 @@ export interface DashboardActivityItem {
   href?: string
 }
 
+export interface DashboardRecentMouseItem {
+  id: string
+  label: string
+  description: string
+  statusLabel: string
+  statusTone: StatusTone
+  href: string
+}
+
+export interface DashboardUpcomingTaskItem {
+  id: string
+  title: string
+  dueLabel: string
+  priorityLabel: string
+  href: string
+}
+
 export interface DashboardData {
   metrics: DashboardMetrics
   attentionItems: readonly DashboardAttentionItem[]
   composition: readonly DashboardCompositionItem[]
+  sexComposition: readonly DashboardCompositionItem[]
+  strainComposition: readonly DashboardCompositionItem[]
+  ageComposition: readonly DashboardCompositionItem[]
   recentActivity: readonly DashboardActivityItem[]
+  recentMice: readonly DashboardRecentMouseItem[]
+  upcomingTasks: readonly DashboardUpcomingTaskItem[]
   updatedAtLabel?: string
 }
 
@@ -54,6 +76,11 @@ export const EMPTY_DASHBOARD_DATA: DashboardData = {
   },
   attentionItems: [],
   composition: [],
+  sexComposition: [],
+  strainComposition: [],
+  ageComposition: [],
   recentActivity: [],
+  recentMice: [],
+  upcomingTasks: [],
   updatedAtLabel: '当前为空库'
 }

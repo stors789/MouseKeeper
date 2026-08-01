@@ -1,9 +1,14 @@
 import type {
   ActivityLog,
+  Mouse,
+  MouseSex,
   MouseStatus,
   Task
 } from '../domain/types'
-import { todayLocalDate } from '../domain/dates'
+import {
+  calculateAgeWeeks,
+  todayLocalDate
+} from '../domain/dates'
 import type { MouseKeeperDatabase } from '../db/database'
 
 const LIVING_STATUSES = new Set<MouseStatus>([
@@ -23,6 +28,9 @@ export interface DashboardSnapshot {
     overdueTasks: number
   }
   statusCounts: Readonly<Record<MouseStatus, number>>
+  sexCounts: Readonly<Record<MouseSex, number>>
+  strainCounts: Array<{ label: string; count: number }>
+  ageCounts: Array<{ id: string; label: string; count: number }>
   attention: Array<{
     id: string
     kind: 'overdue-task' | 'cage-capacity' | 'abnormal-event'
@@ -32,6 +40,8 @@ export interface DashboardSnapshot {
     href: string
   }>
   recentActivity: ActivityLog[]
+  recentMice: Mouse[]
+  upcomingTasks: Task[]
   generatedAt: string
 }
 
@@ -107,10 +117,56 @@ export async function loadDashboardSnapshot(
   ])
 
   const statusCounts = emptyStatusCounts()
+  const sexCounts: Record<MouseSex, number> = {
+    male: 0,
+    female: 0,
+    unknown: 0,
+    intersex: 0,
+    other: 0
+  }
+  const strainMap = new Map<string, number>()
+  const ageCounts = [
+    { id: '0-3', label: '0–3 周', count: 0 },
+    { id: '4-8', label: '4–8 周', count: 0 },
+    { id: '9-16', label: '9–16 周', count: 0 },
+    { id: '17-32', label: '17–32 周', count: 0 },
+    { id: '33+', label: '33 周以上', count: 0 },
+    { id: 'unknown', label: '周龄未知', count: 0 }
+  ]
   let livingMice = 0
   for (const mouse of mice) {
     statusCounts[mouse.status] += 1
+    sexCounts[mouse.sex] += 1
+    strainMap.set(mouse.strain, (strainMap.get(mouse.strain) ?? 0) + 1)
+    let ageBucketId = 'unknown'
+    if (mouse.birthDate) {
+      const weeks = calculateAgeWeeks(mouse.birthDate, today)
+      if (weeks <= 3) ageBucketId = '0-3'
+      else if (weeks <= 8) ageBucketId = '4-8'
+      else if (weeks <= 16) ageBucketId = '9-16'
+      else if (weeks <= 32) ageBucketId = '17-32'
+      else ageBucketId = '33+'
+    }
+    const ageBucket = ageCounts.find((item) => item.id === ageBucketId)
+    if (ageBucket) ageBucket.count += 1
     if (LIVING_STATUSES.has(mouse.status)) livingMice += 1
+  }
+  const sortedStrains = [...strainMap.entries()].toSorted(
+    (left, right) =>
+      right[1] - left[1] ||
+      left[0].localeCompare(right[0], 'zh-CN', { numeric: true })
+  )
+  const topStrains = sortedStrains.slice(0, 5).map(([label, count]) => ({
+    label,
+    count
+  }))
+  if (sortedStrains.length > 5) {
+    topStrains.push({
+      label: '其他品系',
+      count: sortedStrains
+        .slice(5)
+        .reduce((sum, [, count]) => sum + count, 0)
+    })
   }
 
   const experimentMouseIds = new Set(
@@ -190,8 +246,22 @@ export async function loadDashboardSnapshot(
       overdueTasks: overdueTasks.length
     },
     statusCounts,
+    sexCounts,
+    strainCounts: topStrains,
+    ageCounts,
     attention: attention.slice(0, 10),
     recentActivity,
+    recentMice: mice
+      .toSorted((left, right) =>
+        right.updatedAt.localeCompare(left.updatedAt)
+      )
+      .slice(0, 5),
+    upcomingTasks: tasks
+      .filter((task) => !isTaskOverdue(task, today))
+      .toSorted((left, right) =>
+        left.dueSortKey.localeCompare(right.dueSortKey)
+      )
+      .slice(0, 5),
     generatedAt: new Date().toISOString()
   }
 }

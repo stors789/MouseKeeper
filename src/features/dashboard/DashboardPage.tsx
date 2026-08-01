@@ -27,6 +27,7 @@ import type {
   DashboardCompositionItem,
   DashboardData,
   DashboardMetrics,
+  DashboardRecentMouseItem,
   DashboardStatus
 } from './dashboardData'
 
@@ -199,24 +200,33 @@ function AttentionQueue({
 }
 
 function Composition({
-  items
+  emptyDescription = '创建小鼠记录后，这里会显示当前群体分布。',
+  emptyTitle = '还没有可用的群体数据',
+  eyebrow = '当前结构',
+  items,
+  title = '状态构成'
 }: {
   items: readonly DashboardCompositionItem[]
+  title?: string
+  eyebrow?: string
+  emptyTitle?: string
+  emptyDescription?: string
 }) {
   let total = 0
   for (const item of items) {
     total += item.count
   }
+  const titleId = `composition-${title}`
 
   return (
     <section
       className="dashboard-section"
-      aria-labelledby="composition-title"
+      aria-labelledby={titleId}
     >
       <header className="dashboard-section__header">
         <div>
-          <p className="dashboard-section__eyebrow">当前结构</p>
-          <h3 id="composition-title">状态构成</h3>
+          <p className="dashboard-section__eyebrow">{eyebrow}</p>
+          <h3 id={titleId}>{title}</h3>
         </div>
         {total > 0 ? <span className="section-total">{total} 只</span> : null}
       </header>
@@ -251,8 +261,97 @@ function Composition({
         <EmptyState
           compact
           icon={Rat}
-          title="还没有群体构成数据"
-          description="创建小鼠记录后，这里会按当前状态直接标注数量与比例。"
+          title={emptyTitle}
+          description={emptyDescription}
+        />
+      )}
+    </section>
+  )
+}
+
+function RecentMice({
+  items
+}: {
+  items: readonly DashboardRecentMouseItem[]
+}) {
+  return (
+    <section
+      className="dashboard-section"
+      aria-labelledby="recent-mice-title"
+    >
+      <header className="dashboard-section__header">
+        <div>
+          <p className="dashboard-section__eyebrow">最近变更</p>
+          <h3 id="recent-mice-title">最近小鼠</h3>
+        </div>
+        <Link className="section-link" href="/mice">
+          查看小鼠档案
+        </Link>
+      </header>
+      {items.length > 0 ? (
+        <ul className="dashboard-record-list">
+          {items.map((item) => (
+            <li key={item.id}>
+              <div>
+                <Link href={item.href}>{item.label}</Link>
+                <p>{item.description}</p>
+              </div>
+              <StatusChip
+                label={item.statusLabel}
+                tone={item.statusTone}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <EmptyState
+          compact
+          icon={Rat}
+          title="还没有小鼠记录"
+          description="新建或编辑的小鼠会按更新时间显示在这里。"
+        />
+      )}
+    </section>
+  )
+}
+
+function UpcomingTasks({
+  items
+}: {
+  items: DashboardData['upcomingTasks']
+}) {
+  return (
+    <section
+      className="dashboard-section"
+      aria-labelledby="upcoming-task-title"
+    >
+      <header className="dashboard-section__header">
+        <div>
+          <p className="dashboard-section__eyebrow">接下来</p>
+          <h3 id="upcoming-task-title">即将到期任务</h3>
+        </div>
+        <Link className="section-link" href="/tasks">
+          查看任务
+        </Link>
+      </header>
+      {items.length > 0 ? (
+        <ul className="dashboard-record-list">
+          {items.map((item) => (
+            <li key={item.id}>
+              <div>
+                <Link href={item.href}>{item.title}</Link>
+                <p>截止 {item.dueLabel}</p>
+              </div>
+              <StatusChip label={item.priorityLabel} tone="informative" />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <EmptyState
+          compact
+          icon={ListTodo}
+          title="没有即将到期的任务"
+          description="未来任务会按截止时间显示在这里。"
         />
       )}
     </section>
@@ -400,6 +499,23 @@ export function DashboardPage({
       <div className="dashboard-grid">
         <AttentionQueue items={data.attentionItems} />
         <Composition items={data.composition} />
+        <Composition
+          eyebrow="生物学结构"
+          items={data.sexComposition}
+          title="性别构成"
+        />
+        <Composition
+          eyebrow="群体来源"
+          items={data.strainComposition}
+          title="品系构成"
+        />
+        <Composition
+          eyebrow="生命周期"
+          items={data.ageComposition}
+          title="周龄分布"
+        />
+        <RecentMice items={data.recentMice} />
+        <UpcomingTasks items={data.upcomingTasks} />
         <RecentActivity items={data.recentActivity} />
       </div>
     </div>
