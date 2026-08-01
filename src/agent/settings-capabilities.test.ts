@@ -68,7 +68,7 @@ describe('Agent settings capabilities', () => {
     const profile = store.get().profiles[0]!
     await execute('settings.agent.provider.update', {
       profileId: profile.id,
-      patch: { customHeaders: [{ id: 'h1', name: 'X-Secret', secret: true, value: 'raw-secret', secretRef: 'primary' }] }
+      patch: { customHeaders: [{ id: 'h1', name: 'X-Secret', secret: true, value: 'raw-secret' }] }
     })
     expect(store.getProfile(profile.id).customHeaders[0]).toEqual({
       id: 'h1', name: 'X-Secret', secret: true, value: undefined, secretRef: undefined
@@ -100,7 +100,19 @@ describe('Agent settings capabilities', () => {
     await expect(execute('settings.agent.preset.update', {
       presetId: store.getPreset().id,
       patch: { id: 'replaced' }
-    })).rejects.toThrow('不允许修改')
+    })).rejects.toThrow('$.patch.id')
+  })
+
+  it('enforces nested setting types and never accepts secret references in Provider patches', async () => {
+    const { execute, store } = setup()
+    await expect(execute('settings.agent.preset.update', {
+      presetId: store.getPreset().id,
+      patch: { timeoutMs: 'fast' }
+    })).rejects.toThrow('$.patch.timeoutMs')
+    await expect(execute('settings.agent.provider.update', {
+      profileId: store.get().profiles[0]!.id,
+      patch: { customHeaders: [{ id: 'h', name: 'X-Key', secret: true, secretRef: 'forbidden' }] }
+    })).rejects.toThrow('$.patch.customHeaders[0].secretRef')
   })
 
   it('exports and imports configuration without secret references', () => {
