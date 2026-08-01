@@ -15,6 +15,8 @@ MouseKeeper 是面向个人实验人员的本地优先小鼠群体管理 PWA。�
 - 任务：今日/逾期/未来 7 天、关联对象筛选、完成、恢复、取消和删除。
 - 数据安全：16 张业务表的 SHA-256 完整 JSON 备份、预检、恢复前安全副本、事务性恢复、CSV 预览与逐行导入、五类 CSV 导出、示例数据和完整性扫描。
 - 客户端：浅色/深色/跟随系统、桌面侧栏、移动端导航、离线应用壳和可安装 PWA。
+- Agent：自然语言查询与完整业务操作、复合工作流、上下文指代、执行轨迹、自动恢复点和整命令撤回。
+- 模型设置：OpenAI Responses、兼容 Responses、兼容 Chat Completions/本地服务、自定义 API、完整生成参数与多预设。
 
 ## 环境要求
 
@@ -58,6 +60,7 @@ Playwright 会构建生产版本并运行 Desktop Chrome 和 Pixel 7 两个项�
 3. 从小鼠详情记录体重、事件、任务或进入实验；从笼位详情执行移入、移出和转笼。
 4. 在“设置”运行完整性扫描并请求浏览器持久存储。
 5. 在录入真实数据前后分别下载完整 JSON 备份，并把文件复制到浏览器之外的可靠位置。
+6. 如需 Agent，先在“设置 → Agent 服务与模型”配置用户网关或兼容服务，再从侧栏进入 Agent；`⌘/Ctrl+J` 可随时打开。
 
 ## PWA 安装与离线
 
@@ -78,13 +81,16 @@ Service Worker 只缓存版本化应用壳和明确的同源静态资源，不�
 ## 数据与隐私
 
 - IndexedDB 数据库名和产品版本集中配置在 src/config/app.ts。
-- localStorage 仅保存主题和列表显示偏好，不保存核心业务记录。
+- localStorage 保存主题、列表偏好、非秘密 Provider 配置，以及用户明确选择“保存在本机”时的 API Key；核心业务记录始终不保存在 localStorage。
 - 数据导出全部在浏览器本地生成；仓库不包含真实实验数据、数据库转储、密钥或 Token。
+- 使用远程 LLM 时，用户命令和被工具按需读取的业务数据会发送到该 Provider；API Key 与秘密请求头不会作为模型上下文。
 - JSON 校验和用于发现意外损坏，不是加密、数字签名或来源认证。需要保密时，应使用操作系统加密磁盘或加密归档保护备份文件。
 
 ## 项目结构
 
     src/app/             运行时组合与错误处理
+    src/application/     UI/Agent 共享能力目录、视图与文件适配器
+    src/agent/           Provider、编排、设置、恢复与评测
     src/components/      通用 UI 原语
     src/config/          集中产品配置
     src/domain/          类型、校验、日期与纯规则
@@ -105,5 +111,8 @@ Service Worker 只缓存版本化应用壳和明确的同源静态资源，不�
 - [迁移策略](docs/migrations.md)
 - [测试与验收](docs/testing.md)
 - [已知限制](docs/known-limitations.md)
+- [Agent 使用说明](docs/agent.md)
+- [LLM Provider 与自定义 API](docs/llm-providers.md)
+- [Agent 隐私与本地存储](docs/agent-privacy.md)
 
 MouseKeeper v0.1.0 不是受监管 LIMS、医疗器械或合规记录系统，也不提供云同步、多用户权限、电子签名或自动远程备份。

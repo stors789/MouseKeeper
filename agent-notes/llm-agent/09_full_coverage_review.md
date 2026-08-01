@@ -1,5 +1,7 @@
 # LLM Agent 完整能力覆盖独立审查
 
+> 历史快照：本报告记录五轮实施后修复之前的严格审查结果，不是最终覆盖结论。schema、页面上下文、菜单/导航保护、文件 preview/commit、高风险撤回和逐行 runtime 契约缺口已在 `iterations/iteration-01-schema.md` 至 `iteration-05-provider-ui.md` 中修复；最终认证见仓库根目录 `LLM_CAPABILITY_AUDIT.md`。
+
 审查日期：2026-08-01  
 审查对象：`LLM_CAPABILITY_AUDIT.md` 的 106 项基线能力与当前 `feat/llm-agent` 工作树  
 审查口径：只有“可发现的 capability ID + 足够窄且可理解的输入 schema + 稳定 handler/页面或业务落地 + 修改型命令恢复边界 + 能证明该条路径的自动化测试”全部成立才记 **covered**。**partial 不计覆盖**。
