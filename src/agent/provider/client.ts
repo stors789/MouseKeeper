@@ -68,7 +68,12 @@ async function send(
     const timeout = combineSignal(options.signal, options.timeoutMs)
     let keepSignalAlive = false
     try {
-      const response = await options.fetchImpl(request.url, {
+      // Call fetch as a standalone function. Calling `options.fetchImpl(...)`
+      // gives the native browser function the options object as its receiver,
+      // which Chromium can reject with `Illegal invocation` before any request
+      // reaches the network.
+      const fetchImpl = options.fetchImpl
+      const response = await fetchImpl(request.url, {
         method: request.method,
         headers: request.headers,
         body: request.body,
@@ -188,7 +193,10 @@ export class ProviderClient {
       const testPreset = {
         ...preset,
         stream: false,
-        maxOutputTokens: 1,
+        // Some reasoning models spend the first few tokens internally. With a
+        // one-token budget DeepSeek returns an otherwise-successful response as
+        // `incomplete`, which makes the connection check unnecessarily brittle.
+        maxOutputTokens: 16,
         retries: 0
       }
       const result = await this.generate(profile, testPreset, {
@@ -200,7 +208,10 @@ export class ProviderClient {
     } catch (error) {
       const providerError = error instanceof ProviderError
         ? error
-        : new ProviderError('network-or-cors', '连接测试失败')
+        : new ProviderError(
+            'invalid-request',
+            error instanceof Error ? redact(error.message) : '连接测试失败'
+          )
       return {
         ok: false,
         testedAt,

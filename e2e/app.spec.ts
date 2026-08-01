@@ -140,7 +140,7 @@ test('global search restores focus to its trigger when dismissed', async ({
   await expect(trigger).toBeFocused()
 })
 
-test('Agent workspace preserves page context and exposes complete model settings', async ({
+test('Agent workspace preserves page context and keeps advanced model settings available', async ({
   page
 }) => {
   await page.goto('/mice')
@@ -157,17 +157,83 @@ test('Agent workspace preserves page context and exposes complete model settings
   await page.getByRole('link', { name: '模型设置' }).click()
   await expect(page).toHaveURL('/settings')
   await expect(page.getByRole('heading', { name: 'Agent 服务与模型' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '常用设置' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: '模型', exact: true })).toHaveValue('gpt-5.6-sol')
+  await expect(page.getByLabel('服务地址')).toBeVisible()
+  await page.getByRole('combobox', { name: '服务', exact: true }).click()
+  await page.getByRole('option', { name: '本地 OpenAI 兼容服务', exact: true }).click()
+  await page.reload()
+  await expect(page.getByRole('combobox', { name: '服务', exact: true })).toContainText('本地 OpenAI 兼容服务')
+  await page.getByText('高级设置与配置管理', { exact: true }).click()
   await expect(page.getByText('浏览器密钥边界')).toBeVisible()
   await expect(page.getByLabel('API 协议')).toBeVisible()
-  await expect(page.getByLabel('模型名称')).toHaveValue('gpt-5.6-sol')
   await expect(page.getByLabel('本地上下文超限策略')).toBeVisible()
-  await page.getByText('Provider 高级设置', { exact: true }).click()
   await page.getByLabel('流式响应格式').click()
   await page.getByRole('option', { name: 'JSONL', exact: true }).click()
   await page.reload()
-  await page.getByText('Provider 高级设置', { exact: true }).click()
+  await page.getByText('高级设置与配置管理', { exact: true }).click()
   await expect(page.getByLabel('流式响应格式')).toContainText('JSONL')
   await expectNoHorizontalOverflow(page)
+})
+
+test('Agent workspace lets the user attach and remove a referenced execution record', async ({ page }) => {
+  await page.goto('/agent')
+  await expect(page.getByRole('heading', { level: 2, name: 'MouseKeeper Agent' })).toBeVisible()
+  await page.waitForFunction(async () => {
+    const databases = await indexedDB.databases()
+    if (!databases.some((database) => database.name === 'mousekeeper-agent')) return false
+    return await new Promise<boolean>((resolve) => {
+      const request = indexedDB.open('mousekeeper-agent')
+      request.onsuccess = () => {
+        const ready = request.result.objectStoreNames.contains('commandRuns')
+        request.result.close()
+        resolve(ready)
+      }
+      request.onerror = () => resolve(false)
+    })
+  })
+  await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('mousekeeper-agent')
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error ?? new Error('无法打开 Agent 数据库'))
+    })
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('commandRuns', 'readwrite')
+      transaction.objectStore('commandRuns').put({
+        id: 'reference-e2e',
+        sessionId: 'reference-session',
+        prompt: '统计需要新增的笼位',
+        presetId: 'high-quality',
+        model: 'test-model',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        status: 'succeeded',
+        capabilityIds: ['query.entities'],
+        traces: [],
+        summary: '需要新增一个容量为 5 的笼位。',
+        changes: [],
+        preferenceChanges: [],
+        recoveryKind: 'none'
+      })
+      transaction.oncomplete = () => resolve()
+      transaction.onerror = () => reject(transaction.error ?? new Error('无法写入 Agent 测试记录'))
+    })
+    database.close()
+  })
+  await page.reload()
+
+  const card = page.locator('.agent-run-card').filter({ hasText: '统计需要新增的笼位' })
+  await card.getByRole('button', { name: '引用', exact: true }).click()
+  const references = page.getByLabel('已引用的对话记录')
+  await expect(references).toContainText('已引用 1 条记录')
+  await expect(references).toContainText('统计需要新增的笼位')
+  await expect(card.getByRole('button', { name: '已引用', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expectNoHorizontalOverflow(page)
+
+  await references.getByTitle('移除引用').click()
+  await expect(references).toBeHidden()
+  await expect(card.getByRole('button', { name: '引用', exact: true })).toHaveAttribute('aria-pressed', 'false')
 })
 
 test('mobile operational subroutes stay usable without page overflow', async ({
@@ -210,9 +276,13 @@ test('creates a cage, an assigned mouse, a weight, and a linked task', async ({
   await page.getByLabel('最大容量').fill('5')
   await page.getByRole('button', { name: '保存笼位' }).click()
   await expect(page).toHaveURL(/\/cages\/(?!new$)[^/]+$/)
+  const cageDetailUrl = page.url()
   await expect(
     page.getByRole('heading', { level: 2, name: 'E2E-CAGE' })
   ).toBeVisible()
+  await page.goto('/cages')
+  await page.locator('.cage-record').filter({ hasText: 'E2E-CAGE' }).getByRole('link').click()
+  await expect(page).toHaveURL(cageDetailUrl)
 
   await page.goto('/mice/new')
   await page.getByLabel('耳标号').fill('E2E-MOUSE')
@@ -221,10 +291,15 @@ test('creates a cage, an assigned mouse, a weight, and a linked task', async ({
   await page.getByRole('option', { name: /E2E-CAGE/ }).click()
   await page.getByRole('button', { name: '保存小鼠' }).click()
   await expect(page).toHaveURL(/\/mice\/(?!new$)[^/]+$/)
+  const mouseDetailUrl = page.url()
   await expect(
     page.getByRole('heading', { level: 2, name: 'E2E-MOUSE' })
   ).toBeVisible()
   await expect(page.getByText('E2E-CAGE', { exact: true })).toBeVisible()
+  await page.goto('/mice')
+  await page.getByRole('button', { name: '卡片视图' }).click()
+  await page.getByRole('link', { name: '查看 E2E-MOUSE 详情' }).click()
+  await expect(page).toHaveURL(mouseDetailUrl)
 
   await page.getByRole('button', { name: '记录体重' }).click()
   const weightDialog = page.getByRole('dialog', { name: '记录体重' })
@@ -396,6 +471,10 @@ test('records weight and event, assigns an experiment, and completes a task', as
   await page.getByLabel('实验名称').fill('E2E Study')
   await page.getByRole('button', { name: '创建实验与组别' }).click()
   await expect(page).toHaveURL(/\/experiments\/(?!new$)[^/]+$/)
+  const experimentDetailUrl = page.url()
+  await page.goto('/experiments')
+  await page.locator('.experiment-record').filter({ hasText: 'E2E Study' }).getByRole('link').click()
+  await expect(page).toHaveURL(experimentDetailUrl)
   await page.getByRole('button', { name: '批量加入小鼠' }).click()
   const assignmentDialog = page.getByRole('dialog', {
     name: '批量加入实验组'

@@ -15,10 +15,21 @@ export interface AgentModelClient {
 export interface AgentContext {
   currentRoute: string
   selected: EntityReference[]
+  references?: AgentRunReference[]
   visibleFilters?: Record<string, unknown>
   locale: string
   timeZone: string
   now: string
+}
+
+export interface AgentRunReference {
+  id: string
+  createdAt: string
+  prompt: string
+  status: AgentCommandRun['status']
+  summary?: string
+  error?: string
+  capabilityIds: string[]
 }
 
 export interface AgentRunInput {

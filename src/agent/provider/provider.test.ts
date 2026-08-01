@@ -380,8 +380,34 @@ describe('Provider request mapping', () => {
     const report = await new ProviderClient(secrets, fakeFetch).testConnection(profile, preset)
     expect(report).toMatchObject({ ok: true, method: 'generation' })
     const body = JSON.parse(bodies[0]!) as Record<string, unknown>
-    expect(body).toMatchObject({ stream: false, max_output_tokens: 1 })
+    expect(body).toMatchObject({ stream: false, max_output_tokens: 16 })
     expect(body.tools).toEqual([])
+  })
+
+  it('reports local request-building failures without mislabeling them as network errors', async () => {
+    const { profile, preset, secrets } = fixtures()
+    profile.modelsPath = undefined
+    preset.model = ''
+    const report = await new ProviderClient(secrets).testConnection(profile, preset)
+    expect(report).toMatchObject({
+      ok: false,
+      error: { kind: 'invalid-request', message: '尚未配置模型名称' }
+    })
+  })
+
+  it('invokes browser fetch without an object receiver', async () => {
+    const { profile, preset, secrets } = fixtures()
+    profile.modelsPath = undefined
+    const receiverSensitiveFetch = function (this: unknown) {
+      if (this !== undefined) throw new TypeError('Illegal invocation')
+      return Promise.resolve(new Response(JSON.stringify({
+        id: 'test-response', status: 'completed', output: []
+      }), { status: 200 }))
+    } as typeof fetch
+
+    await expect(
+      new ProviderClient(secrets, receiverSensitiveFetch).testConnection(profile, preset)
+    ).resolves.toMatchObject({ ok: true })
   })
 })
 

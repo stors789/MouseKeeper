@@ -190,6 +190,32 @@ describe('AgentOrchestrator', () => {
     expect(model.requests[0]?.instructions).toContain('只有唯一来源时直接解析')
   })
 
+  it('includes user-selected run references and directly usable capability schemas', async () => {
+    const model = new ScriptedModel(() => ({
+      text: '已使用引用上下文。',
+      toolCalls: [],
+      effective: { requested: settings.presets[0]!, omitted: [] }
+    }))
+    const input = runInput('按上次结果创建一个笼位')
+    input.context.references = [{
+      id: 'run-previous',
+      createdAt: '2026-08-01T11:00:00+08:00',
+      prompt: '统计需要新增的笼位',
+      status: 'succeeded',
+      summary: '需要新增一个容量为 5 的笼位。',
+      capabilityIds: ['query.entities']
+    }]
+
+    await orchestrator(model).run(input)
+    const instructions = model.requests[0]?.instructions ?? ''
+    expect(instructions).toContain('用户显式引用的记录')
+    expect(instructions).toContain('需要新增一个容量为 5 的笼位')
+    expect(instructions).toContain('cage.create')
+    expect(instructions).toContain('inputSchema')
+    expect(instructions).toContain('无需先搜索')
+    expect(instructions).toContain('能力目录')
+  })
+
   it('stops at the configured tool-round limit without inventing success', async () => {
     const model = new ScriptedModel((_input, index) => ({
       text: '',
