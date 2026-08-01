@@ -4,6 +4,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 const WORKSPACES = [
   ['/', '群体总览'],
+  ['/agent', 'MouseKeeper Agent'],
   ['/mice', '小鼠档案'],
   ['/cages', '笼位管理'],
   ['/breeding', '繁育与窝记录'],
@@ -125,6 +126,27 @@ test('global search restores focus to its trigger when dismissed', async ({
   await expect(page.getByLabel('搜索 MouseKeeper')).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(trigger).toBeFocused()
+})
+
+test('Agent workspace preserves page context and exposes complete model settings', async ({
+  page
+}) => {
+  await page.goto('/mice')
+  await page.getByRole('link', { name: 'Agent', exact: true }).click()
+  await expect(page).toHaveURL('/agent')
+  await expect(page.locator('.agent-context-strip > span').first()).toContainText('/mice')
+  await page.getByRole('textbox', { name: 'Agent 命令' }).fill('导出全部小鼠 CSV')
+  await expect(page.getByRole('button', { name: '执行命令' })).toBeEnabled()
+  await expect(page.getByRole('combobox', { name: 'Agent 模型预设' })).toContainText('gpt-5.6-sol')
+  await expectNoHorizontalOverflow(page)
+
+  await page.getByRole('link', { name: '模型设置' }).click()
+  await expect(page).toHaveURL('/settings')
+  await expect(page.getByRole('heading', { name: 'Agent 服务与模型' })).toBeVisible()
+  await expect(page.getByText('浏览器密钥边界')).toBeVisible()
+  await expect(page.getByLabel('API 协议')).toBeVisible()
+  await expect(page.getByLabel('模型名称')).toHaveValue('gpt-5.6-sol')
+  await expectNoHorizontalOverflow(page)
 })
 
 test('mobile operational subroutes stay usable without page overflow', async ({
