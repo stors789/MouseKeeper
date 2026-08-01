@@ -4,8 +4,8 @@ import { APP_CONFIG } from '../config/app'
 import {
   entitySchemas,
   idSchema,
+  instantToLocalDateTime,
   isoInstantSchema,
-  localDateTimeToInstant,
   normalizeText
 } from '../domain'
 import type {
@@ -881,12 +881,15 @@ function validateReferences(data: BackupData): BackupIssue[] {
       )
     }
     try {
-      const expectedOccurredAt = localDateTimeToInstant(
-        event.occurredOn,
-        event.occurredTime ?? '00:00',
+      const actualLocalTime = instantToLocalDateTime(
+        event.occurredAt,
         event.timeZone
       )
-      if (expectedOccurredAt !== event.occurredAt) {
+      if (
+        actualLocalTime.date !== event.occurredOn ||
+        (event.occurredTime !== undefined &&
+          actualLocalTime.time !== event.occurredTime)
+      ) {
         issues.push(
           issue(
             'relation-mismatch',
@@ -928,12 +931,15 @@ function validateReferences(data: BackupData): BackupIssue[] {
     )
     const event = eventById.get(weight.eventId)
     try {
-      const expectedMeasuredAt = localDateTimeToInstant(
-        weight.measuredOn,
-        weight.measuredTime ?? '00:00',
+      const actualLocalTime = instantToLocalDateTime(
+        weight.measuredAt,
         weight.timeZone
       )
-      if (expectedMeasuredAt !== weight.measuredAt) {
+      if (
+        actualLocalTime.date !== weight.measuredOn ||
+        (weight.measuredTime !== undefined &&
+          actualLocalTime.time !== weight.measuredTime)
+      ) {
         issues.push(
           issue(
             'relation-mismatch',
