@@ -631,7 +631,7 @@ describe('MouseKeeperService', () => {
       groupId: control.id,
       joinedOn: TODAY
     })
-    const exited = await service.exitExperimentAssignments({
+    const batchExitInput = {
       operationId: operationId('batch-exit-experiment'),
       now: NOW,
       assignmentIds: [
@@ -640,12 +640,22 @@ describe('MouseKeeperService', () => {
       ],
       exitedOn: TODAY,
       reason: 'batch endpoint'
-    })
+    }
+    const exited = await service.exitExperimentAssignments(batchExitInput)
     expect(
       exited.value.entries.every(
         (entry) => entry.assignment.activeFlag === 0
       )
     ).toBe(true)
+    const exitReplay = await service.exitExperimentAssignments(batchExitInput)
+    expect(exitReplay.replayed).toBe(true)
+    expect(exitReplay.value.entries).toHaveLength(2)
+    await expect(
+      service.exitExperimentAssignments({
+        ...batchExitInput,
+        reason: 'different request'
+      })
+    ).rejects.toMatchObject({ code: 'invalid-state' })
     await expect(
       service.updateExperiment({
         operationId: operationId('close-empty-experiment'),
@@ -812,16 +822,47 @@ describe('MouseKeeperService', () => {
     expect(
       (await database.weightRecords.get(first.value.weight.id))?.deletedFlag
     ).toBe(1)
-    const restored = await service.restoreMouseEvent({
+    const restoreInput = {
       operationId: operationId('restore-weight-event'),
       now: '2026-07-30T10:00:00.000Z',
       eventId: deleted.value.id,
       expectedRevision: deleted.value.revision
-    })
+    }
+    const restored = await service.restoreMouseEvent(restoreInput)
     expect(restored.value.deletedFlag).toBe(0)
     expect(
       (await database.weightRecords.get(first.value.weight.id))?.deletedFlag
     ).toBe(0)
+    const restoreReplay = await service.restoreMouseEvent(restoreInput)
+    expect(restoreReplay.replayed).toBe(true)
+
+    const brokenPair = await service.recordWeight({
+      operationId: operationId('broken-weight'),
+      now: NOW,
+      mouseId: mouse.id,
+      measuredOn: TODAY,
+      measuredTime: '10:00',
+      value: 26,
+      unit: 'g'
+    })
+    const brokenDeleted = await service.softDeleteMouseEvent({
+      operationId: operationId('delete-broken-weight'),
+      now: NOW,
+      eventId: brokenPair.value.event.id,
+      expectedRevision: brokenPair.value.event.revision
+    })
+    await database.weightRecords.delete(brokenPair.value.weight.id)
+    await expect(
+      service.restoreMouseEvent({
+        operationId: operationId('restore-broken-weight'),
+        now: NOW,
+        eventId: brokenDeleted.value.id,
+        expectedRevision: brokenDeleted.value.revision
+      })
+    ).rejects.toMatchObject({ code: 'integrity-error' })
+    expect(
+      (await database.mouseEvents.get(brokenDeleted.value.id))?.deletedFlag
+    ).toBe(1)
   })
 
   it('keeps operational events behind their domain commands', async () => {

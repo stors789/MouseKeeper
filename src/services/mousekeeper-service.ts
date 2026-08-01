@@ -2811,6 +2811,7 @@ export class MouseKeeperService {
   async exitExperimentAssignments(
     input: ExitExperimentAssignmentsInput
   ): Promise<CommandResult<ExperimentBatchAssignmentValue>> {
+    const action = 'experiment.exit-mice'
     const assignmentIds = [...new Set(input.assignmentIds)]
     if (assignmentIds.length === 0) {
       throw new ServiceError(
@@ -2824,6 +2825,12 @@ export class MouseKeeperService {
         'The batch contains duplicate experiment assignment IDs'
       )
     }
+    const requestKey = JSON.stringify({
+      assignmentIds: assignmentIds.toSorted(),
+      exitedOn: input.exitedOn,
+      exitedTime: input.exitedTime ?? null,
+      reason: input.reason ?? null
+    })
     return this.database.transaction(
       'rw',
       [
@@ -2835,6 +2842,59 @@ export class MouseKeeperService {
         this.database.activityLogs
       ],
       async () => {
+        const replay = await this.operationLog(input.operationId, action)
+        if (replay) {
+          if (
+            !isRecord(replay.metadata) ||
+            replay.metadata.requestKey !== requestKey
+          ) {
+            throw new ServiceError(
+              'invalid-state',
+              'operationId was already used for a different experiment exit batch'
+            )
+          }
+          const resultIds = replay.resultEntityIds ?? []
+          if (resultIds.length !== assignmentIds.length * 2) {
+            throw new ServiceError(
+              'integrity-error',
+              'Experiment exit batch replay is incomplete'
+            )
+          }
+          const entries: ExperimentAssignmentValue[] = []
+          for (let index = 0; index < resultIds.length; index += 2) {
+            const assignment = await this.database.experimentAssignments.get(
+              resultIds[index]!
+            )
+            const event = await this.database.mouseEvents.get(
+              resultIds[index + 1]!
+            )
+            if (!assignment || !event) {
+              throw new ServiceError(
+                'integrity-error',
+                'Experiment exit batch replay references missing records'
+              )
+            }
+            entries.push({ assignment, event })
+          }
+          return { value: { entries }, replayed: true, warnings: [] }
+        }
+        const currentAssignments = await this.database.experimentAssignments
+          .bulkGet(assignmentIds)
+        if (currentAssignments.some((item) => item === undefined)) {
+          throw new ServiceError(
+            'not-found',
+            'One or more experiment assignments were not found'
+          )
+        }
+        const experimentIds = new Set(
+          currentAssignments.map((item) => item!.experimentId)
+        )
+        if (experimentIds.size !== 1) {
+          throw new ServiceError(
+            'invalid-state',
+            'A batch exit must belong to one experiment'
+          )
+        }
         const results: CommandResult<ExperimentAssignmentValue>[] = []
         for (const [index, assignmentId] of assignmentIds.entries()) {
           results.push(
@@ -2852,6 +2912,23 @@ export class MouseKeeperService {
             })
           )
         }
+        const now = resolveNow(input)
+        const experimentId = [...experimentIds][0]!
+        await this.addActivity(input, now, {
+          action,
+          primaryEntityType: 'experiment',
+          primaryEntityId: experimentId,
+          entityRefs: assignmentIds.map(
+            (assignmentId) =>
+              ['experimentAssignment', assignmentId] as const
+          ),
+          summary: `Exited ${assignmentIds.length} experiment assignments`,
+          resultEntityIds: results.flatMap((result) => [
+            result.value.assignment.id,
+            result.value.event.id
+          ]),
+          metadata: { requestKey, assignmentIds }
+        })
         return {
           value: { entries: results.map(result => result.value) },
           replayed: results.every(result => result.replayed),

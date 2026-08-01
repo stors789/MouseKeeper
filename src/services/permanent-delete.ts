@@ -28,6 +28,12 @@ function sumCounts(counts: Record<string, number>): number {
   return Object.values(counts).reduce((total, count) => total + count, 0)
 }
 
+function isRecord(
+  value: unknown
+): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null
+}
+
 export async function createPurgePreview(
   database: MouseKeeperDatabase,
   entityType: PurgeEntityType,
@@ -255,6 +261,25 @@ export async function purgeDeletedEntity(
   const now = new Date().toISOString()
   let deletedCount = 0
   await database.transaction('rw', database.tables, async () => {
+    const expectedAction = `${preview.entityType}.purge`
+    const replay = await database.activityLogs
+      .where('operationId')
+      .equals(operationId)
+      .first()
+    if (replay) {
+      const metadata = isRecord(replay.metadata)
+        ? replay.metadata
+        : undefined
+      if (
+        replay.action !== expectedAction ||
+        replay.primaryEntityId !== preview.entityId ||
+        typeof metadata?.deletedRecords !== 'number'
+      ) {
+        throw new Error('永久删除 operationId 已用于不同请求')
+      }
+      deletedCount = metadata.deletedRecords
+      return
+    }
     const latest = await createPurgePreview(
       database,
       preview.entityType,

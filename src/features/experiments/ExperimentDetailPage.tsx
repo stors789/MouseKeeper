@@ -133,6 +133,11 @@ export function ExperimentDetailPage({
     [activeAssignments, effectiveGroupId]
   )
 
+  const validSelectedExitAssignmentIds = useMemo(() => {
+    const activeIds = new Set(activeAssignments.map((item) => item.id))
+    return selectedExitAssignmentIds.filter((id) => activeIds.has(id))
+  }, [activeAssignments, selectedExitAssignmentIds])
+
   const run = async (key: string, action: () => Promise<void>) => {
     setBusy(key)
     setError(undefined)
@@ -264,16 +269,16 @@ export function ExperimentDetailPage({
 
   const submitBatchExit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (selectedExitAssignmentIds.length === 0) return
+    if (validSelectedExitAssignmentIds.length === 0) return
     const values = new FormData(event.currentTarget)
     void run('exit-batch', async () => {
       await appService.exitExperimentAssignments({
         operationId: crypto.randomUUID(),
-        assignmentIds: selectedExitAssignmentIds,
+        assignmentIds: validSelectedExitAssignmentIds,
         exitedOn: formString(values, 'exitedOn'),
         reason: optional(formString(values, 'reason'))
       })
-      const count = selectedExitAssignmentIds.length
+      const count = validSelectedExitAssignmentIds.length
       setSelectedExitAssignmentIds([])
       setExitBatchOpen(false)
       showToast({
@@ -377,11 +382,11 @@ export function ExperimentDetailPage({
           </Button>
           <Button
             variant="secondary"
-            disabled={selectedExitAssignmentIds.length === 0}
+            disabled={validSelectedExitAssignmentIds.length === 0}
             leadingIcon={<LogOut aria-hidden="true" size={17} />}
             onClick={() => setExitBatchOpen(true)}
           >
-            批量退出 {selectedExitAssignmentIds.length || ''}
+            批量退出 {validSelectedExitAssignmentIds.length || ''}
           </Button>
         </div>
       </header>
@@ -783,7 +788,7 @@ export function ExperimentDetailPage({
       >
         <form className="dialog-form" onSubmit={submitBatchExit}>
           <Alert
-            title={`将退出 ${selectedExitAssignmentIds.length} 条成员关系`}
+            title={`将退出 ${validSelectedExitAssignmentIds.length} 条成员关系`}
             tone="warning"
           >
             历史分组、加入事件和退出原因都会保留。
@@ -814,7 +819,7 @@ export function ExperimentDetailPage({
             <Button
               type="submit"
               loading={busy === 'exit-batch'}
-              disabled={selectedExitAssignmentIds.length === 0}
+              disabled={validSelectedExitAssignmentIds.length === 0}
             >
               确认批量退出
             </Button>

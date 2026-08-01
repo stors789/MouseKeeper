@@ -36,9 +36,19 @@ describe('permanent deletion', () => {
     const preview = await createPurgePreview(database, 'task', task.id)
 
     expect(preview.canPurge).toBe(true)
-    await purgeDeletedEntity(database, preview, 'purge-operation')
+    const deletedCount = await purgeDeletedEntity(
+      database,
+      preview,
+      'purge-operation'
+    )
+    const replayedCount = await purgeDeletedEntity(
+      database,
+      preview,
+      'purge-operation'
+    )
 
     expect(await database.tasks.get(task.id)).toBeUndefined()
+    expect(replayedCount).toBe(deletedCount)
     expect(
       await database.activityLogs
         .where('operationId')
