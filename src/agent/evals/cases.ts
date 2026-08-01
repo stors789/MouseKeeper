@@ -12,6 +12,7 @@ const FIXED_CONTEXT: EvalContextContract = {
 const POLICIES: Readonly<Record<string, readonly [CapabilityRisk, RecoveryStrategy]>> = {
   'navigation.open': ['view-only', 'none'],
   'navigation.open.entity': ['view-only', 'none'],
+  'view.create-menu.open': ['view-only', 'none'],
   'view.search.focus': ['view-only', 'none'],
   'view.configure': ['reversible', 'row-diff'],
   'settings.theme.set': ['reversible', 'row-diff'],
@@ -81,7 +82,7 @@ function argsFor(id: string, token: string): Record<string, unknown> {
     'experiment.exit.batch': { assignmentIds: [commonId], exitedOn: '2026-08-01' },
     'experiment.delete': { experimentId: commonId },
     'experiment.restore': { experimentId: commonId },
-    'event.create': { mouseId: commonId, eventType: 'note', occurredOn: '2026-08-01', title: token },
+    'event.create': { mouseId: commonId, eventType: 'custom', occurredOn: '2026-08-01', title: token },
     'event.update': { eventId: commonId, patch: { notes: token } },
     'event.delete': { eventId: commonId },
     'event.restore': { eventId: commonId },
@@ -157,7 +158,7 @@ function makeCase(input: {
 }
 
 const AUDIT_MAPPINGS: readonly [string, readonly string[]][] = [
-  ['打开一级工作区', ['navigation.open']], ['通过总览指标打开预筛选列表', ['navigation.open', 'view.configure']], ['通过总览提醒打开数据、任务或小鼠', ['navigation.open']], ['打开全局新建菜单', ['navigation.open']], ['从新建菜单进入 6 种创建流程', ['navigation.open']], ['打开全局搜索', ['view.search.focus']], ['搜索工作区、小鼠、笼位、实验、任务', ['query.search']], ['从全局搜索打开结果并恢复焦点', ['navigation.open.entity']], ['切换浅色、深色、跟随系统', ['settings.theme.set']], ['离开未保存表单时得到保护', ['navigation.open']],
+  ['打开一级工作区', ['navigation.open']], ['通过总览指标打开预筛选列表', ['navigation.open', 'view.configure']], ['通过总览提醒打开数据、任务或小鼠', ['navigation.open']], ['打开全局新建菜单', ['view.create-menu.open']], ['从新建菜单进入 6 种创建流程', ['navigation.open']], ['打开全局搜索', ['view.search.focus']], ['搜索工作区、小鼠、笼位、实验、任务', ['query.search']], ['从全局搜索打开结果并恢复焦点', ['navigation.open.entity']], ['切换浅色、深色、跟随系统', ['settings.theme.set']], ['离开未保存表单时得到保护', ['navigation.open']],
   ['查看总览统计、分布、容量、任务和活动', ['query.dashboard']], ['搜索小鼠', ['view.configure']], ['按性别筛选小鼠', ['view.configure']], ['按状态筛选小鼠', ['view.configure']], ['按品系/基因型筛选小鼠', ['view.configure']], ['按笼位筛选小鼠', ['view.configure']], ['按实验筛选小鼠', ['view.configure']], ['按标签筛选小鼠', ['view.configure']], ['按出生日期范围筛选小鼠', ['view.configure']], ['包含已删除小鼠', ['view.configure']], ['设置小鼠排序字段与方向', ['view.configure']], ['小鼠分页及每页数量', ['view.configure']], ['清除小鼠筛选', ['view.configure']], ['选择单只、当前页或筛选结果中的小鼠', ['view.configure']], ['创建保存视图', ['saved-view.create']], ['应用保存视图', ['view.configure']], ['更新保存视图', ['saved-view.update']], ['删除保存视图', ['saved-view.delete']],
   ['创建单只小鼠并可初始分笼', ['mouse.create']], ['复制现有小鼠为新记录', ['query.entities', 'mouse.create']], ['原子批量创建小鼠', ['mouse.create.batch']], ['编辑小鼠全部可编辑字段', ['mouse.update']], ['批量更改小鼠状态', ['mouse.status.batch']], ['单只更改小鼠状态', ['mouse.status.set']], ['终结小鼠状态并结束关系', ['mouse.status.set']], ['批量转笼', ['mouse.move.batch']], ['单只移入/转入笼位', ['mouse.move']], ['单只移出笼位', ['mouse.cage.leave']], ['批量增删标签', ['mouse.tags.batch']], ['单只设置标签', ['mouse.tags.set']], ['创建标签并立即关联', ['tag.create', 'mouse.tags.set']], ['删除标签', ['tag.delete']], ['软删除小鼠', ['mouse.delete']], ['从回收站恢复小鼠', ['mouse.restore']], ['查看小鼠详情、谱系、笼位、实验、体重和时间线', ['query.entities', 'navigation.open.entity']], ['创建一般事件', ['event.create']], ['编辑一般事件', ['event.update']], ['软删除事件或配对体重', ['event.delete']], ['从回收站恢复事件或配对体重', ['event.restore']], ['记录单次体重', ['weight.record']], ['快速批量记录体重', ['weight.record.batch']],
   ['搜索笼位', ['query.entities']], ['查看笼位容量、成员和转笼历史', ['query.entities', 'navigation.open.entity']], ['创建笼位', ['cage.create']], ['编辑笼位全部可编辑字段', ['cage.update']], ['从笼位详情选择小鼠移入', ['mouse.move']], ['从笼位详情移出成员', ['mouse.cage.leave']], ['软删除空笼位', ['cage.delete']], ['从回收站恢复笼位', ['cage.restore']], ['查看繁育组合与窝列表', ['query.entities']], ['创建繁育组合并处理规则警告', ['breeding.create']], ['编辑繁育日期、状态和备注', ['breeding.update']], ['原子创建窝和后代', ['breeding.litter.create']], ['查看实验、组别和成员', ['query.entities']], ['创建实验及初始组别', ['experiment.create']], ['编辑实验全部可编辑字段', ['experiment.update']], ['创建实验组别', ['experiment.group.create']], ['批量将小鼠加入实验组', ['experiment.assign.batch']], ['单只加入实验组', ['experiment.assign']], ['单只退出实验', ['experiment.exit']], ['批量退出实验', ['experiment.exit.batch']], ['软删除实验', ['experiment.delete']], ['从回收站恢复实验', ['experiment.restore']],

@@ -2,6 +2,7 @@ import { createApplicationCapabilityRegistry } from '../../application'
 import type { JsonSchema } from '../../application'
 import { createMouseKeeperDatabase } from '../../db'
 import { MouseKeeperService } from '../../services'
+import { validateJsonSchema } from '../../application/capabilities/schema'
 import { AGENT_EVAL_CASES, AGENT_EVAL_CATEGORY_COUNTS } from './cases'
 import type { AgentEvalCase, EvalExpectedCall } from './types'
 import deterministicModelSource from './deterministic-model.ts?raw'
@@ -57,6 +58,7 @@ describe('offline Agent eval contract matrix', () => {
         expect(call.risk, `${evalCase.id}: risk`).toBe(descriptor?.risk)
         expect(call.recovery, `${evalCase.id}: recovery`).toBe(descriptor?.recovery)
         expect(missingRequired(descriptor!.inputSchema, call.input), `${evalCase.id}: required args`).toEqual([])
+        expect(validateJsonSchema(call.input, descriptor!.inputSchema), `${evalCase.id}: runtime schema`).toEqual([])
       }
     }
   })
