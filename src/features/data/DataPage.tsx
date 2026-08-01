@@ -274,13 +274,32 @@ export function DataPage() {
         appDatabase,
         restoreFile
       )
-      downloadBlob(
-        backupBlob(restoreResult.preRestoreBackup),
-        timestampFilename('mousekeeper-exact-before-restore', 'json')
-      )
+      let safetyDownloadError: unknown
+      try {
+        downloadBlob(
+          backupBlob(restoreResult.preRestoreBackup),
+          timestampFilename('mousekeeper-exact-before-restore', 'json')
+        )
+      } catch (downloadError) {
+        safetyDownloadError = downloadError
+      }
       setRestoreFile(undefined)
       setRestorePreview(undefined)
       setRestoreConfirmation('')
+      if (safetyDownloadError) {
+        setError(
+          `本地数据已恢复，但浏览器未能发起安全备份下载：${readableError(
+            safetyDownloadError
+          )}`
+        )
+        showToast({
+          title: '数据已恢复，安全备份下载失败',
+          description: '请立即重新下载一份完整备份，并确认文件已落盘。',
+          tone: 'critical',
+          duration: 15_000
+        })
+        return
+      }
       showToast({
         title: '本地数据已恢复',
         description: '已发起事务内精确恢复前安全备份下载。',
@@ -710,7 +729,7 @@ export function DataPage() {
                 {restorePreview.canRestore ? (
                   <>
                     <Alert title="恢复将替换当前全部本地数据" tone="warning">
-                      点击恢复时会先下载一份当前数据库安全备份；恢复在单一事务中执行，失败会自动回滚。
+                      事务会先封装当前数据库的精确安全副本，再替换全部表；失败会自动回滚，成功后浏览器发起安全副本下载。
                     </Alert>
                     <label className="confirmation-field">
                       <span>
@@ -730,7 +749,7 @@ export function DataPage() {
                       leadingIcon={<RefreshCw aria-hidden="true" size={17} />}
                       onClick={restoreBackup}
                     >
-                      下载安全备份并执行恢复
+                      执行恢复并下载安全备份
                     </Button>
                   </>
                 ) : null}

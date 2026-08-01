@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+
 import { expect, test, type Page } from '@playwright/test'
 
 const WORKSPACES = [
@@ -406,6 +408,23 @@ test('sample data can be generated and downloaded in a complete backup', async (
   )
   const backupPath = await download.path()
   expect(backupPath).not.toBeNull()
+  if (!backupPath) throw new Error('Playwright did not retain the backup file')
+
+  const tamperedBackup = JSON.parse(await readFile(backupPath, 'utf8')) as {
+    appVersion: string
+  }
+  tamperedBackup.appVersion = 'tampered-without-resigning'
+  await page
+    .locator('input[type="file"][accept*="json"]')
+    .setInputFiles({
+      name: 'mousekeeper-corrupted-backup.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(tamperedBackup))
+    })
+  await expect(page.getByText('备份不能恢复')).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: '执行恢复并下载安全备份' })
+  ).toHaveCount(0)
 
   await page.getByRole('button', { name: '示例数据' }).click()
   await page.getByRole('button', { name: '生成一组示例数据' }).click()
@@ -417,7 +436,7 @@ test('sample data can be generated and downloaded in a complete backup', async (
   await expect(page.getByText('备份验证通过')).toBeVisible()
   await page.locator('.confirmation-field input').fill('替换本地数据')
   await page
-    .getByRole('button', { name: '下载安全备份并执行恢复' })
+    .getByRole('button', { name: '执行恢复并下载安全备份' })
     .click()
   await expect(page.getByText('本地数据已恢复')).toBeVisible()
   await page.getByRole('button', { name: '示例数据' }).click()
