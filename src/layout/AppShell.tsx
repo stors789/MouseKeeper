@@ -10,6 +10,7 @@ import {
 } from 'react'
 import { useLocation } from 'wouter'
 import { APP_CONFIG } from '../config/app'
+import { APPLICATION_EVENT_NAMES } from '../application'
 import { CreateMenu } from './CreateMenu'
 import { MobileNavigation } from './MobileNavigation'
 import { Sidebar } from './Sidebar'
@@ -31,7 +32,7 @@ function isEditableTarget(target: EventTarget | null) {
 }
 
 export function AppShell({ children }: AppShellProps) {
-  const [location] = useLocation()
+  const [location, setLocation] = useLocation()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const searchTriggerRef = useRef<HTMLButtonElement>(null)
@@ -57,6 +58,22 @@ export function AppShell({ children }: AppShellProps) {
   }, [location, pageTitle])
 
   useEffect(() => {
+    const navigate = (event: Event) => {
+      const detail = (event as CustomEvent<{ href?: unknown }>).detail
+      if (typeof detail?.href === 'string' && detail.href.startsWith('/')) {
+        setLocation(detail.href)
+      }
+    }
+    const focusSearch = () => setGlobalSearchOpen(true)
+    globalThis.addEventListener(APPLICATION_EVENT_NAMES.navigate, navigate)
+    globalThis.addEventListener(APPLICATION_EVENT_NAMES.focusSearch, focusSearch)
+    return () => {
+      globalThis.removeEventListener(APPLICATION_EVENT_NAMES.navigate, navigate)
+      globalThis.removeEventListener(APPLICATION_EVENT_NAMES.focusSearch, focusSearch)
+    }
+  }, [setGlobalSearchOpen, setLocation])
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target)) {
         return
@@ -71,6 +88,16 @@ export function AppShell({ children }: AppShellProps) {
         !event.ctrlKey &&
         !event.altKey
 
+      const commandAgent =
+        event.key.toLocaleLowerCase() === 'j' &&
+        (event.metaKey || event.ctrlKey)
+
+      if (commandAgent) {
+        event.preventDefault()
+        setLocation('/agent')
+        return
+      }
+
       if (commandSearch || slashSearch) {
         event.preventDefault()
         setGlobalSearchOpen(true)
@@ -79,7 +106,7 @@ export function AppShell({ children }: AppShellProps) {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [setGlobalSearchOpen])
+  }, [setGlobalSearchOpen, setLocation])
 
   return (
     <div

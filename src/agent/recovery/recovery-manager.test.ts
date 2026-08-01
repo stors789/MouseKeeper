@@ -119,4 +119,21 @@ describe('RecoveryManager', () => {
     expect(run.recoveryKind).toBe('full-backup')
     expect(run.fullBefore).toBeDefined()
   })
+
+  it('captures and conflict-checks non-secret application preferences', async () => {
+    window.localStorage.setItem('mousekeeper:theme:v1', 'light')
+    const token = await recovery.begin({ sessionId: 'session-1', prompt: '切换主题' })
+    window.localStorage.setItem('mousekeeper:theme:v1', 'dark')
+    const run = await recovery.finish(token, {
+      status: 'succeeded',
+      capabilityIds: ['settings.theme.set'],
+      traces: [],
+      summary: '主题已切换'
+    })
+    expect(run.preferenceChanges).toEqual([
+      { key: 'mousekeeper:theme:v1', before: 'light', after: 'dark' }
+    ])
+    await recovery.undo(run.id)
+    expect(window.localStorage.getItem('mousekeeper:theme:v1')).toBe('light')
+  })
 })

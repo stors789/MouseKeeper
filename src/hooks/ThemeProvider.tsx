@@ -10,6 +10,7 @@ import {
   type ResolvedTheme,
   type ThemePreference
 } from './themeContext'
+import { APPLICATION_EVENT_NAMES } from '../application'
 
 const THEME_STORAGE_KEY = 'mousekeeper:theme:v1'
 const DARK_MODE_QUERY = '(prefers-color-scheme: dark)'
@@ -60,6 +61,20 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
     root.dataset.themePreference = preference
     root.style.colorScheme = resolvedTheme
   }, [preference, resolvedTheme])
+
+  useEffect(() => {
+    const handleTheme = (event: Event) => {
+      const theme = (event as CustomEvent<{ theme?: string }>).detail?.theme
+      if (isThemePreference(theme ?? null)) setPreference(theme as ThemePreference)
+    }
+    const handleRestore = () => setPreference(readStoredTheme())
+    globalThis.addEventListener(APPLICATION_EVENT_NAMES.setTheme, handleTheme)
+    globalThis.addEventListener('mousekeeper:preferences-restored', handleRestore)
+    return () => {
+      globalThis.removeEventListener(APPLICATION_EVENT_NAMES.setTheme, handleTheme)
+      globalThis.removeEventListener('mousekeeper:preferences-restored', handleRestore)
+    }
+  }, [])
 
   useEffect(() => {
     try {

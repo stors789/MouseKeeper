@@ -7,6 +7,12 @@ export interface RecoveryRowChange {
   after?: Record<string, unknown>
 }
 
+export interface RecoveryPreferenceChange {
+  key: string
+  before?: string
+  after?: string
+}
+
 export interface CommandToolTrace {
   capabilityId: string
   startedAt: string
@@ -37,6 +43,7 @@ export interface AgentCommandRun {
   summary?: string
   error?: string
   changes: RecoveryRowChange[]
+  preferenceChanges: RecoveryPreferenceChange[]
   recoveryKind: 'none' | 'row-diff' | 'full-backup'
   fullBefore?: BackupData
   undoneAt?: string
@@ -51,6 +58,7 @@ export interface RecoveryStartToken {
   model?: string
   startedAt: string
   before: BackupData
+  beforePreferences: Record<string, string>
 }
 
 export interface RecoveryFinishInput {

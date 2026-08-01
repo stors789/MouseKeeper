@@ -2,7 +2,7 @@ import { BACKUP_TABLE_NAMES, type BackupData } from '../../backup'
 import { canonicalJson } from '../../backup/canonical'
 import type { MouseKeeperDatabase } from '../../db'
 import type { AgentDatabase } from './database'
-import type { AgentCommandRun, RecoveryFinishInput, RecoveryRowChange, RecoveryStartToken, UndoResult } from './types'
+import type { AgentCommandRun, RecoveryFinishInput, RecoveryPreferenceChange, RecoveryRowChange, RecoveryStartToken, UndoResult } from './types'
 
 const FULL_BACKUP_ROW_THRESHOLD = 25
 const FULL_BACKUP_TABLE_THRESHOLD = 4
@@ -11,6 +11,33 @@ function redactPrompt(prompt: string): string {
   return prompt
     .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '[已隐藏密钥]')
     .replace(/(authorization|api[-_ ]?key)\s*[:=]\s*\S+/gi, '$1: [已隐藏]')
+}
+
+function snapshotPreferences(): Record<string, string> {
+  const storage = globalThis.window?.localStorage
+  if (!storage) return {}
+  const result: Record<string, string> = {}
+  try {
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index)
+      if (!key?.startsWith('mousekeeper:')) continue
+      if (key.startsWith('mousekeeper:llm-secret:')) continue
+      const value = storage.getItem(key)
+      if (value !== null) result[key] = value
+    }
+  } catch {
+    return {}
+  }
+  return result
+}
+
+function diffPreferences(
+  before: Readonly<Record<string, string>>,
+  after: Readonly<Record<string, string>>
+): RecoveryPreferenceChange[] {
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter((key) => before[key] !== after[key])
+    .map((key) => ({ key, before: before[key], after: after[key] }))
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -100,7 +127,8 @@ export class RecoveryManager {
       presetId: input.presetId,
       model: input.model,
       startedAt,
-      before: await snapshotBusinessData(this.businessDatabase)
+      before: await snapshotBusinessData(this.businessDatabase),
+      beforePreferences: snapshotPreferences()
     }
     await this.historyDatabase.commandRuns.put({
       id: token.id,
@@ -114,6 +142,7 @@ export class RecoveryManager {
       capabilityIds: [],
       traces: [],
       changes: [],
+      preferenceChanges: [],
       recoveryKind: 'full-backup',
       fullBefore: structuredClone(token.before)
     })
@@ -123,6 +152,10 @@ export class RecoveryManager {
   async finish(token: RecoveryStartToken, input: RecoveryFinishInput): Promise<AgentCommandRun> {
     const after = await snapshotBusinessData(this.businessDatabase)
     const changes = diffBusinessData(token.before, after)
+    const preferenceChanges = diffPreferences(
+      token.beforePreferences,
+      snapshotPreferences()
+    )
     const changedTables = new Set(changes.map((change) => change.table)).size
     const fullBackup =
       changes.length > 0 &&
@@ -145,8 +178,13 @@ export class RecoveryManager {
       summary: input.summary,
       error: input.error,
       changes,
+      preferenceChanges,
       recoveryKind:
-        changes.length === 0 ? 'none' : fullBackup ? 'full-backup' : 'row-diff',
+        changes.length === 0 && preferenceChanges.length === 0
+          ? 'none'
+          : fullBackup
+            ? 'full-backup'
+            : 'row-diff',
       fullBefore: fullBackup ? structuredClone(token.before) : undefined
     }
     await this.historyDatabase.commandRuns.put(record)
@@ -169,13 +207,23 @@ export class RecoveryManager {
     const record = await this.historyDatabase.commandRuns.get(commandRunId)
     if (!record) throw new Error('找不到要撤回的 Agent 命令')
     if (record.status === 'undone') throw new Error('这条命令已经撤回')
-    if (record.changes.length === 0) throw new Error('这条命令没有可撤回的数据变化')
+    if (record.changes.length === 0 && record.preferenceChanges.length === 0) {
+      throw new Error('这条命令没有可撤回的数据变化')
+    }
 
     const conflicts: string[] = []
     for (const change of record.changes) {
       const current = await this.businessDatabase.table(change.table).get(change.id)
       if (!sameRow(current, change.after)) {
         conflicts.push(`${change.table}:${change.id}`)
+      }
+    }
+    const storage = globalThis.window?.localStorage
+    if (storage) {
+      for (const change of record.preferenceChanges) {
+        if (storage.getItem(change.key) !== (change.after ?? null)) {
+          conflicts.push(`preference:${change.key}`)
+        }
       }
     }
     if (conflicts.length > 0) {
@@ -191,13 +239,22 @@ export class RecoveryManager {
 
     const tableNames = [...new Set(record.changes.map((change) => change.table))]
     const tables = tableNames.map((name) => this.businessDatabase.table(name))
-    await this.businessDatabase.transaction('rw', tables, async () => {
-      for (const change of [...record.changes].reverse()) {
-        const table = this.businessDatabase.table(change.table)
-        if (change.before) await table.put(structuredClone(change.before))
-        else await table.delete(change.id)
+    if (tables.length > 0) {
+      await this.businessDatabase.transaction('rw', tables, async () => {
+        for (const change of [...record.changes].reverse()) {
+          const table = this.businessDatabase.table(change.table)
+          if (change.before) await table.put(structuredClone(change.before))
+          else await table.delete(change.id)
+        }
+      })
+    }
+    if (storage) {
+      for (const change of record.preferenceChanges) {
+        if (change.before === undefined) storage.removeItem(change.key)
+        else storage.setItem(change.key, change.before)
       }
-    })
+      globalThis.dispatchEvent?.(new CustomEvent('mousekeeper:preferences-restored'))
+    }
 
     const updatedAt = new Date().toISOString()
     const updated: AgentCommandRun = {
@@ -208,6 +265,9 @@ export class RecoveryManager {
       summary: record.summary ? `已撤回：${record.summary}` : '命令已撤回'
     }
     await this.historyDatabase.commandRuns.put(updated)
-    return { commandRun: updated, restoredRows: record.changes.length }
+    return {
+      commandRun: updated,
+      restoredRows: record.changes.length + record.preferenceChanges.length
+    }
   }
 }
