@@ -14,7 +14,6 @@ import {
 } from 'lucide-react'
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -27,13 +26,14 @@ import type { AgentProgress, AgentRunResult } from '../../agent/orchestrator'
 import { providerSettingsStore } from '../../agent/provider/settings-store'
 import { secretStore } from '../../agent/provider/secret-store'
 import type { AgentCommandRun } from '../../agent/recovery'
-import { fileBroker, type EntityReference } from '../../application'
+import { applicationContextStore, fileBroker, type EntityReference } from '../../application'
 import { Alert } from '../../components/ui/Alert'
 import { Button } from '../../components/ui/Button'
 import { Select } from '../../components/ui/Select'
 import { StatusChip } from '../../components/ui/StatusChip'
 import { Textarea } from '../../components/ui/Textarea'
 import { readableError } from '../../lib/errors'
+import { commandCanUndo, commandHasChanges, commandStatusLabel } from './run-presentation'
 
 interface RunView {
   commandRun: AgentCommandRun
@@ -95,6 +95,11 @@ export function AgentPage() {
     () => providerSettingsStore.snapshot(),
     () => providerSettingsStore.snapshot()
   )
+  const pageContext = useSyncExternalStore(
+    applicationContextStore.subscribe,
+    applicationContextStore.snapshot,
+    applicationContextStore.snapshot
+  )
   const [presetId, setPresetId] = useState(settings.defaultPresetId)
   const [prompt, setPrompt] = useState('')
   const [runs, setRuns] = useState<RunView[]>([])
@@ -106,8 +111,8 @@ export function AgentPage() {
   const [fileBusy, setFileBusy] = useState<string>()
   const abortRef = useRef<AbortController | undefined>(undefined)
   const composerRef = useRef<HTMLTextAreaElement>(null)
-  const route = useMemo(() => contextRoute(), [])
-  const selected = useMemo(() => selectedFromRoute(route), [route])
+  const route = pageContext?.route ?? contextRoute()
+  const selected = pageContext ? [...pageContext.selected] : selectedFromRoute(route)
   const preset = settings.presets.find((item) => item.id === presetId) ?? settings.presets[0]
   const profile = settings.profiles.find((item) => item.id === preset?.providerProfileId)
   const configured = Boolean(profile && (
@@ -152,6 +157,7 @@ export function AgentPage() {
         context: {
           currentRoute: route,
           selected,
+          visibleFilters: pageContext?.visibleFilters,
           locale: navigator.language || 'zh-CN',
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           now: new Date().toISOString()
@@ -228,7 +234,8 @@ export function AgentPage() {
 
       <section className="agent-context-strip" aria-label="Agent 当前上下文">
         <span><strong>页面上下文</strong>{route}</span>
-        <span><strong>选中对象</strong>{selected[0] ? `${selected[0].type} · ${selected[0].id}` : '无'}</span>
+        <span><strong>当前筛选</strong>{pageContext ? `${pageContext.workspace} · ${Object.entries(pageContext.visibleFilters).filter(([, value]) => value !== undefined && value !== '' && value !== 'all').map(([key, value]) => `${key}=${String(value)}`).join('，') || '无筛选'}` : '无页面状态'}</span>
+        <span><strong>选中对象</strong>{selected.length ? selected.map((item) => `${item.type} · ${item.label ?? item.id}`).join('；') : '无'}</span>
         <label>
           <strong>模型预设</strong>
           <Select ariaLabel="Agent 模型预设" value={preset?.id ?? ''} options={settings.presets.map((item) => ({ value: item.id, label: `${item.name} · ${item.model}` }))} onValueChange={setPresetId} />
@@ -305,7 +312,8 @@ export function AgentPage() {
           ) : (
             <div className="agent-run-list">
               {runs.map(({ commandRun, result }) => {
-                const canUndo = commandRun.status === 'succeeded' && (commandRun.changes.length > 0 || commandRun.preferenceChanges.length > 0)
+                const hasChanges = commandHasChanges(commandRun)
+                const canUndo = commandCanUndo(commandRun)
                 const fileRequests = result?.results.flatMap((item) => item.artifacts ?? []).filter((artifact) => artifact.kind === 'file-request') ?? []
                 const openTargets = result?.results.flatMap((item) => item.open ? [item.open] : []) ?? []
                 return (
@@ -315,7 +323,7 @@ export function AgentPage() {
                         <span>{dateTime(commandRun.createdAt)} · {commandRun.model ?? '未知模型'}</span>
                         <h4>{commandRun.prompt}</h4>
                       </div>
-                      <StatusChip label={commandRun.status === 'succeeded' ? '已完成' : commandRun.status === 'undone' ? '已撤回' : commandRun.status === 'running' ? '运行中' : '失败'} tone={statusTone(commandRun)} icon={commandRun.status === 'succeeded' ? CheckCircle2 : commandRun.status === 'running' ? LoaderCircle : TriangleAlert} />
+                      <StatusChip label={commandStatusLabel(commandRun)} tone={statusTone(commandRun)} icon={commandRun.status === 'succeeded' ? CheckCircle2 : commandRun.status === 'running' ? LoaderCircle : TriangleAlert} />
                     </header>
                     <p className="agent-run-card__summary">{commandRun.summary ?? commandRun.error ?? '没有摘要'}</p>
 
@@ -329,7 +337,7 @@ export function AgentPage() {
                     })}
 
                     <footer>
-                      <span>{recoveryLabel(commandRun)} · {commandRun.changes.length + commandRun.preferenceChanges.length} 项变化</span>
+                      <span>{commandRun.status === 'failed' && hasChanges ? '执行失败，但已记录可撤回变化' : recoveryLabel(commandRun)} · {commandRun.changes.length + commandRun.preferenceChanges.length} 项变化</span>
                       <div>
                         <Button size="small" variant="tertiary" leadingIcon={<Pencil aria-hidden="true" size={14} />} onClick={() => { setPrompt(commandRun.prompt); composerRef.current?.focus() }}>编辑重发</Button>
                         <Button size="small" variant="tertiary" disabled={busy} onClick={() => void execute(commandRun.prompt)}>重试</Button>

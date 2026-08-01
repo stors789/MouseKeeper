@@ -1,10 +1,11 @@
 import { useEffect } from 'react'
+import { applicationNavigationGuard } from '../application'
 
 export function useUnsavedChanges(isDirty: boolean): void {
   useEffect(() => {
     if (!isDirty) return undefined
 
-    const message = '当前更改尚未保存，确定离开此页面吗？'
+    const guardToken = applicationNavigationGuard.register()
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault()
       event.returnValue = ''
@@ -38,7 +39,7 @@ export function useUnsavedChanges(isDirty: boolean): void {
       ) {
         return
       }
-      if (!window.confirm(message)) {
+      if (!applicationNavigationGuard.confirmNavigation()) {
         event.preventDefault()
         event.stopPropagation()
         event.stopImmediatePropagation()
@@ -48,7 +49,7 @@ export function useUnsavedChanges(isDirty: boolean): void {
     let restoringHistory = false
     const handlePopState = () => {
       if (restoringHistory) return
-      if (window.confirm(message)) return
+      if (applicationNavigationGuard.confirmNavigation()) return
       restoringHistory = true
       window.history.pushState(null, '', protectedUrl)
       window.dispatchEvent(new PopStateEvent('popstate', { state: null }))
@@ -61,6 +62,7 @@ export function useUnsavedChanges(isDirty: boolean): void {
     document.addEventListener('click', handleDocumentClick, true)
     window.addEventListener('popstate', handlePopState)
     return () => {
+      applicationNavigationGuard.unregister(guardToken)
       window.removeEventListener('beforeunload', handleBeforeUnload)
       document.removeEventListener('click', handleDocumentClick, true)
       window.removeEventListener('popstate', handlePopState)

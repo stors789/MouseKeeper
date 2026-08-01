@@ -8,7 +8,7 @@ import { downloadBlob } from '../../lib/download'
 import { createPurgePreview, purgeDeletedEntity, type MouseKeeperService, type PurgeEntityType } from '../../services'
 import { buildCsvExport, type CsvExportKind } from '../data'
 import { fileBroker, type FileBroker, type FileWorkflowKind } from '../files'
-import { objectSchema, stringSchema, enumSchema, emptyObjectSchema } from './schema'
+import { arraySchema, integerSchema, objectSchema, stringSchema, enumSchema, emptyObjectSchema } from './schema'
 import { createCoreCapabilityRegistry } from './core-handlers'
 import type { CapabilityDescriptor, CapabilityExecutionResult } from './types'
 import type { CapabilityRegistry } from './registry'
@@ -16,6 +16,7 @@ import type { CapabilityRegistry } from './registry'
 export const APPLICATION_EVENT_NAMES = {
   navigate: 'mousekeeper:application-navigate',
   focusSearch: 'mousekeeper:application-focus-search',
+  openCreateMenu: 'mousekeeper:application-open-create-menu',
   setTheme: 'mousekeeper:application-set-theme',
   view: 'mousekeeper:application-view-command'
 } as const
@@ -36,7 +37,10 @@ const miceViewState = objectSchema({
   birthTo: dateOrEmpty,
   includeDeleted: { type: 'boolean' },
   sort: enumSchema(['updated-desc', 'updated-asc', 'label-asc', 'strain-asc', 'age-youngest', 'age-oldest']),
-  viewMode: enumSchema(['table', 'cards'])
+  viewMode: enumSchema(['table', 'cards']),
+  page: { ...integerSchema('从 1 开始的页码'), minimum: 1 },
+  selectedIds: arraySchema(stringSchema()),
+  clear: enumSchema(['none', 'filters', 'selection', 'all'])
 })
 const recordsViewState = objectSchema({
   tab: enumSchema(['events', 'weights', 'activity']),
@@ -59,10 +63,11 @@ const viewConfigureSchema = {
   ]
 } as const
 
-function dispatch(name: string, detail: unknown): void {
+function dispatch(name: string, detail: unknown): boolean {
   if (typeof globalThis.dispatchEvent === 'function' && typeof globalThis.CustomEvent === 'function') {
-    globalThis.dispatchEvent(new CustomEvent(name, { detail }))
+    return globalThis.dispatchEvent(new CustomEvent(name, { detail, cancelable: true }))
   }
+  return true
 }
 
 function timestampFilename(prefix: string, extension: string): string {
@@ -93,6 +98,10 @@ export const EXTENDED_CAPABILITY_DESCRIPTORS: readonly CapabilityDescriptor[] = 
   descriptor({
     id: 'view.search.focus', domain: 'views', name: '聚焦全局搜索', description: '打开并聚焦全局搜索命令框。',
     kind: 'view', inputSchema: emptyObjectSchema, outputDescription: '搜索框已打开', reads: [], writes: [], modifiesData: false, supportsBatch: false, risk: 'view-only', recovery: 'none', service: 'ViewStateAdapter'
+  }),
+  descriptor({
+    id: 'view.create-menu.open', domain: 'views', name: '打开全局新建菜单', description: '打开与顶部和移动端新建按钮相同的 Radix 菜单。',
+    kind: 'view', inputSchema: emptyObjectSchema, outputDescription: '新建菜单已打开', reads: [], writes: [], modifiesData: false, supportsBatch: false, risk: 'view-only', recovery: 'none', service: 'CreateMenuAdapter'
   }),
   descriptor({
     id: 'view.configure', domain: 'views', name: '设置页面筛选排序和标签', description: '按工作区设置与页面组件完全一致的扁平视图状态；不接受嵌套 filters。',
@@ -157,18 +166,22 @@ export function registerExtendedCapabilities(
         if (item.id === 'navigation.open') {
           const href = String(input.href)
           if (!href.startsWith('/') || href.startsWith('//')) throw new Error('只能打开应用内路由')
-          dispatch(APPLICATION_EVENT_NAMES.navigate, { href })
+          if (!dispatch(APPLICATION_EVENT_NAMES.navigate, { href })) throw new Error('用户取消离开未保存表单')
           return { status: 'succeeded', capabilityId: item.id, summary: `已打开 ${href}`, data: { href }, affected: [], warnings: [], modifiesData: false, open: { href, label: '打开页面' } }
         }
         if (item.id === 'navigation.open.entity') {
           const prefixes: Record<string, string> = { mouse: '/mice', cage: '/cages', breedingPair: '/breeding', experiment: '/experiments' }
           const href = `${prefixes[String(input.entityType)]}/${encodeURIComponent(String(input.entityId))}`
-          dispatch(APPLICATION_EVENT_NAMES.navigate, { href })
+          if (!dispatch(APPLICATION_EVENT_NAMES.navigate, { href })) throw new Error('用户取消离开未保存表单')
           return { status: 'succeeded', capabilityId: item.id, summary: '已打开记录详情', data: { href }, affected: [], warnings: [], modifiesData: false, open: { href, label: '打开记录' } }
         }
         if (item.id === 'view.search.focus') {
           dispatch(APPLICATION_EVENT_NAMES.focusSearch, {})
           return { status: 'succeeded', capabilityId: item.id, summary: '已打开全局搜索', affected: [], warnings: [], modifiesData: false }
+        }
+        if (item.id === 'view.create-menu.open') {
+          dispatch(APPLICATION_EVENT_NAMES.openCreateMenu, {})
+          return { status: 'succeeded', capabilityId: item.id, summary: '已打开全局新建菜单', affected: [], warnings: [], modifiesData: false }
         }
         if (item.id === 'view.configure') {
           const state = input.state && typeof input.state === 'object' && !Array.isArray(input.state) ? input.state : {}

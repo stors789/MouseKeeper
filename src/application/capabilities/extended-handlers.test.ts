@@ -102,15 +102,36 @@ describe('extended application capabilities', () => {
     globalThis.addEventListener(APPLICATION_EVENT_NAMES.view, listener)
     await registry.execute(
       'view.configure',
-      { workspace: 'mice', state: { sex: 'female', sort: 'age-oldest' } },
+      { workspace: 'mice', state: { sex: 'female', sort: 'age-oldest', page: 3, selectedIds: ['m-1', 'm-2'], clear: 'selection' } },
       context('view')
     )
     expect(JSON.parse(window.localStorage.getItem('mousekeeper:view-command:mice')!)).toEqual({
       sex: 'female',
-      sort: 'age-oldest'
+      sort: 'age-oldest',
+      page: 3,
+      selectedIds: ['m-1', 'm-2'],
+      clear: 'selection'
     })
     expect(listener).toHaveBeenCalled()
     globalThis.removeEventListener(APPLICATION_EVENT_NAMES.view, listener)
+  })
+
+  it('opens the shared create menu through a stable capability', async () => {
+    const listener = vi.fn()
+    globalThis.addEventListener(APPLICATION_EVENT_NAMES.openCreateMenu, listener)
+    const result = await registry.execute('view.create-menu.open', {}, context('create-menu'))
+    expect(result).toMatchObject({ status: 'succeeded', modifiesData: false })
+    expect(listener).toHaveBeenCalledTimes(1)
+    globalThis.removeEventListener(APPLICATION_EVENT_NAMES.openCreateMenu, listener)
+  })
+
+  it('reports navigation cancellation when an unsaved-form listener prevents it', async () => {
+    const prevent = (event: Event) => event.preventDefault()
+    globalThis.addEventListener(APPLICATION_EVENT_NAMES.navigate, prevent)
+    await expect(registry.execute(
+      'navigation.open', { href: '/agent' }, context('blocked-navigation')
+    )).rejects.toThrow('用户取消离开未保存表单')
+    globalThis.removeEventListener(APPLICATION_EVENT_NAMES.navigate, prevent)
   })
 
   it('rejects view state fields that the target page cannot apply', async () => {

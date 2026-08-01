@@ -108,6 +108,18 @@ test('warns before abandoning an unsaved mouse form', async ({
   await expect(page).toHaveURL('/mice/new')
 
   page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toContain('当前更改尚未保存')
+    await dialog.dismiss()
+  })
+  await page.evaluate(() => {
+    globalThis.dispatchEvent(new CustomEvent('mousekeeper:application-navigate', {
+      cancelable: true,
+      detail: { href: '/agent' }
+    }))
+  })
+  await expect(page).toHaveURL('/mice/new')
+
+  page.once('dialog', async (dialog) => {
     await dialog.accept()
   })
   await page.getByRole('link', { name: '笼位', exact: true }).click()
@@ -132,9 +144,11 @@ test('Agent workspace preserves page context and exposes complete model settings
   page
 }) => {
   await page.goto('/mice')
+  await page.getByLabel('按性别筛选').selectOption('female')
   await page.getByRole('link', { name: 'Agent', exact: true }).click()
   await expect(page).toHaveURL('/agent')
   await expect(page.locator('.agent-context-strip > span').first()).toContainText('/mice')
+  await expect(page.getByText(/mice · .*sex=female/)).toBeVisible()
   await page.getByRole('textbox', { name: 'Agent 命令' }).fill('导出全部小鼠 CSV')
   await expect(page.getByRole('button', { name: '执行命令' })).toBeEnabled()
   await expect(page.getByRole('combobox', { name: 'Agent 模型预设' })).toContainText('gpt-5.6-sol')

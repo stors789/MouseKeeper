@@ -20,7 +20,7 @@ import {
 } from 'react'
 import { Link } from 'wouter'
 import { appDatabase, appService } from '../../app/runtime'
-import { APPLICATION_EVENT_NAMES, readApplicationViewCommand, viewCommandFromEvent } from '../../application'
+import { APPLICATION_EVENT_NAMES, applicationContextStore, readApplicationViewCommand, viewCommandFromEvent } from '../../application'
 import { Alert } from '../../components/ui/Alert'
 import {
   Button,
@@ -292,8 +292,8 @@ export function MicePage() {
   const [includeDeleted, setIncludeDeleted] = useState(() => initialView.includeDeleted === true)
   const [sort, setSort] = useState<MouseSort>(() => (stringValue(initialView.sort, MOUSE_SORTS) ?? 'updated-desc') as MouseSort)
   const [viewMode, setViewMode] = useState<ViewMode>(() => initialView.viewMode === 'cards' || initialView.viewMode === 'table' ? initialView.viewMode : initialViewMode())
-  const [page, setPage] = useState(0)
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [page, setPage] = useState(() => typeof initialView.page === 'number' && Number.isInteger(initialView.page) && initialView.page >= 1 ? initialView.page - 1 : 0)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(Array.isArray(initialView.selectedIds) ? initialView.selectedIds.filter((id): id is string => typeof id === 'string') : []))
   const [batchAction, setBatchAction] = useState<BatchAction>()
   const [batchStatus, setBatchStatus] = useState<MouseStatus>('reserved')
   const [batchCageId, setBatchCageId] = useState('')
@@ -314,6 +314,12 @@ export function MicePage() {
       const nextStatus = stringValue(state.status, new Set(['all', ...MOUSE_STATUSES]))
       const nextSex = stringValue(state.sex, new Set(['all', ...MOUSE_SEXES]))
       const nextSort = stringValue(state.sort, MOUSE_SORTS)
+      if (state.clear === 'filters' || state.clear === 'all') {
+        setQuery(''); setStatus('all'); setSex('all'); setStrain('all'); setGenotype('all')
+        setCageId('all'); setTagId('all'); setExperimentId('all'); setBirthFrom(''); setBirthTo('')
+        setIncludeDeleted(false); setSort('updated-desc'); setActiveViewId('')
+      }
+      if (state.clear === 'selection' || state.clear === 'all') setSelectedIds(new Set())
       if (typeof state.query === 'string') setQuery(state.query)
       if (nextStatus) setStatus(nextStatus as MouseStatus | 'all')
       if (nextSex) setSex(nextSex as MouseSex | 'all')
@@ -327,7 +333,9 @@ export function MicePage() {
       if (typeof state.includeDeleted === 'boolean') setIncludeDeleted(state.includeDeleted)
       if (nextSort) setSort(nextSort as MouseSort)
       if (state.viewMode === 'table' || state.viewMode === 'cards') setViewMode(state.viewMode)
-      setPage(0)
+      if (typeof state.page === 'number' && Number.isInteger(state.page) && state.page >= 1) setPage(state.page - 1)
+      else setPage(0)
+      if (Array.isArray(state.selectedIds)) setSelectedIds(new Set(state.selectedIds.filter((id): id is string => typeof id === 'string')))
       setActiveViewId('')
     }
     globalThis.addEventListener(APPLICATION_EVENT_NAMES.view, handleView)
@@ -407,6 +415,16 @@ export function MicePage() {
       ),
     [data?.records, selectedIds]
   )
+  useEffect(() => {
+    applicationContextStore.publish({
+      workspace: 'mice',
+      route: `${window.location.pathname}${window.location.search}`,
+      visibleFilters: { query, status, sex, strain, genotype, cageId, tagId, experimentId, birthFrom, birthTo, includeDeleted, viewMode, sort, page: safePage + 1 },
+      sort,
+      page: safePage + 1,
+      selected: selectedRecords.map(({ mouse }) => ({ type: 'mouse', id: mouse.id, label: mouseDisplayLabel(mouse), href: `/mice/${encodeURIComponent(mouse.id)}`, revision: mouse.revision }))
+    })
+  }, [birthFrom, birthTo, cageId, experimentId, genotype, includeDeleted, query, safePage, selectedRecords, sex, sort, status, strain, tagId, viewMode])
   const allVisibleSelected =
     visible.length > 0 &&
     visible.every(record => selectedIds.has(record.mouse.id))
