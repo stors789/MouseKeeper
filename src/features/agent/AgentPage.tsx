@@ -6,11 +6,13 @@ import {
   History,
   LoaderCircle,
   Pencil,
+  Quote,
   RotateCcw,
   Send,
   Settings2,
   Square,
-  TriangleAlert
+  TriangleAlert,
+  X
 } from 'lucide-react'
 import {
   useEffect,
@@ -22,7 +24,7 @@ import {
 } from 'react'
 import { Link } from 'wouter'
 import { agentOrchestrator, recoveryManager } from '../../agent/runtime'
-import type { AgentProgress, AgentRunResult } from '../../agent/orchestrator'
+import type { AgentProgress, AgentRunReference, AgentRunResult } from '../../agent/orchestrator'
 import { providerSettingsStore } from '../../agent/provider/settings-store'
 import { secretStore } from '../../agent/provider/secret-store'
 import type { AgentCommandRun } from '../../agent/recovery'
@@ -109,6 +111,7 @@ export function AgentPage() {
   const [error, setError] = useState<string>()
   const [undoing, setUndoing] = useState<string>()
   const [fileBusy, setFileBusy] = useState<string>()
+  const [referenceIds, setReferenceIds] = useState<string[]>([])
   const abortRef = useRef<AbortController | undefined>(undefined)
   const activeExecutionRef = useRef<string | undefined>(undefined)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -120,6 +123,24 @@ export function AgentPage() {
     profile.authMode === 'none' ||
     (profile.secretRef && secretStore.metadata(profile.secretRef).configured)
   ))
+  const references = referenceIds.flatMap((id): AgentRunReference[] => {
+    const run = runs.find((item) => item.commandRun.id === id)?.commandRun
+    return run ? [{
+      id: run.id,
+      createdAt: run.createdAt,
+      prompt: run.prompt,
+      status: run.status,
+      summary: run.summary,
+      error: run.error,
+      capabilityIds: [...run.capabilityIds]
+    }] : []
+  })
+
+  const toggleReference = (id: string) => {
+    setReferenceIds((current) => current.includes(id)
+      ? current.filter((item) => item !== id)
+      : [...current, id].slice(-6))
+  }
 
   useEffect(() => {
     void recoveryManager.recent(30).then((history) => {
@@ -161,6 +182,7 @@ export function AgentPage() {
         context: {
           currentRoute: route,
           selected,
+          references,
           visibleFilters: pageContext?.visibleFilters,
           locale: navigator.language || 'zh-CN',
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -174,6 +196,7 @@ export function AgentPage() {
       setRuns((current) => prependBoundedRun(current, { commandRun: result.commandRun, result }))
       if (result.status === 'failed') setError(result.error ?? 'Agent 命令没有完成')
       setPrompt('')
+      setReferenceIds([])
     } catch (runError) {
       setError(readableError(runError))
     } finally {
@@ -269,6 +292,10 @@ export function AgentPage() {
             <StatusChip label={configured ? '连接配置可用' : '等待配置'} tone={configured ? 'positive' : 'warning'} />
           </div>
           <div className="agent-composer">
+            {references.length ? <div className="agent-references" aria-label="已引用的对话记录">
+              <div><Quote aria-hidden="true" size={15} /><strong>已引用 {references.length} 条记录</strong><span>将随本次命令发送给模型</span></div>
+              <div>{references.map((reference) => <button disabled={busy} key={reference.id} type="button" onClick={() => toggleReference(reference.id)} title="移除引用"><span>{reference.prompt}</span><X aria-hidden="true" size={13} /></button>)}</div>
+            </div> : null}
             <Textarea
               aria-label="Agent 命令"
               autoFocus
@@ -357,6 +384,7 @@ export function AgentPage() {
                     <footer>
                       <span>{commandRun.status === 'failed' && hasChanges ? '执行失败，但已记录可撤回变化' : recoveryLabel(commandRun)} · {commandRun.changes.length + commandRun.preferenceChanges.length} 项变化</span>
                       <div>
+                        <Button aria-pressed={referenceIds.includes(commandRun.id)} disabled={busy} size="small" variant={referenceIds.includes(commandRun.id) ? 'secondary' : 'tertiary'} leadingIcon={<Quote aria-hidden="true" size={14} />} onClick={() => toggleReference(commandRun.id)}>{referenceIds.includes(commandRun.id) ? '已引用' : '引用'}</Button>
                         <Button size="small" variant="tertiary" leadingIcon={<Pencil aria-hidden="true" size={14} />} onClick={() => { setPrompt(commandRun.prompt); composerRef.current?.focus() }}>编辑重发</Button>
                         <Button size="small" variant="tertiary" disabled={busy} onClick={() => void execute(commandRun.prompt)}>重试</Button>
                         {openTargets.map((target) => <Link className="ui-button ui-button--tertiary ui-button--small" href={target.href} key={target.href}>{target.label}<ArrowUpRight aria-hidden="true" size={13} /></Link>)}

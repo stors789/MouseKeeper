@@ -170,6 +170,66 @@ test('Agent workspace preserves page context and exposes complete model settings
   await expectNoHorizontalOverflow(page)
 })
 
+test('Agent workspace lets the user attach and remove a referenced execution record', async ({ page }) => {
+  await page.goto('/agent')
+  await expect(page.getByRole('heading', { level: 2, name: 'MouseKeeper Agent' })).toBeVisible()
+  await page.waitForFunction(async () => {
+    const databases = await indexedDB.databases()
+    if (!databases.some((database) => database.name === 'mousekeeper-agent')) return false
+    return await new Promise<boolean>((resolve) => {
+      const request = indexedDB.open('mousekeeper-agent')
+      request.onsuccess = () => {
+        const ready = request.result.objectStoreNames.contains('commandRuns')
+        request.result.close()
+        resolve(ready)
+      }
+      request.onerror = () => resolve(false)
+    })
+  })
+  await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('mousekeeper-agent')
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error ?? new Error('无法打开 Agent 数据库'))
+    })
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('commandRuns', 'readwrite')
+      transaction.objectStore('commandRuns').put({
+        id: 'reference-e2e',
+        sessionId: 'reference-session',
+        prompt: '统计需要新增的笼位',
+        presetId: 'high-quality',
+        model: 'test-model',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        status: 'succeeded',
+        capabilityIds: ['query.entities'],
+        traces: [],
+        summary: '需要新增一个容量为 5 的笼位。',
+        changes: [],
+        preferenceChanges: [],
+        recoveryKind: 'none'
+      })
+      transaction.oncomplete = () => resolve()
+      transaction.onerror = () => reject(transaction.error ?? new Error('无法写入 Agent 测试记录'))
+    })
+    database.close()
+  })
+  await page.reload()
+
+  const card = page.locator('.agent-run-card').filter({ hasText: '统计需要新增的笼位' })
+  await card.getByRole('button', { name: '引用', exact: true }).click()
+  const references = page.getByLabel('已引用的对话记录')
+  await expect(references).toContainText('已引用 1 条记录')
+  await expect(references).toContainText('统计需要新增的笼位')
+  await expect(card.getByRole('button', { name: '已引用', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expectNoHorizontalOverflow(page)
+
+  await references.getByTitle('移除引用').click()
+  await expect(references).toBeHidden()
+  await expect(card.getByRole('button', { name: '引用', exact: true })).toHaveAttribute('aria-pressed', 'false')
+})
+
 test('mobile operational subroutes stay usable without page overflow', async ({
   isMobile,
   page

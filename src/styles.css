@@ -4555,6 +4555,52 @@ kbd {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 18%, transparent);
 }
 
+.agent-references {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--accent-soft);
+}
+
+.agent-references > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.agent-references > div:first-child {
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.agent-references > div:first-child span {
+  color: var(--text-muted);
+}
+
+.agent-references button {
+  min-width: 0;
+  max-width: 260px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  background: var(--bg-surface);
+  color: var(--text-default);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.agent-references button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .agent-composer .ui-textarea {
   min-height: 172px;
   border: 0;

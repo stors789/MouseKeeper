@@ -56,6 +56,37 @@ function uniqueAffected(results: readonly CapabilityExecutionResult[]): EntityRe
   return [...refs.values()]
 }
 
+function capabilityTokens(value: string): string[] {
+  const normalized = value.toLocaleLowerCase()
+  const latin = normalized.match(/[a-z0-9.]{2,}/g) ?? []
+  const chinese = (normalized.match(/[\u3400-\u9fff]+/g) ?? []).flatMap((part) => {
+    if (part.length < 2) return [part]
+    return Array.from({ length: part.length - 1 }, (_, index) => part.slice(index, index + 2))
+  })
+  return [...new Set([...latin, ...chinese])]
+}
+
+function relevantCapabilities(
+  catalog: readonly CapabilityDescriptor[],
+  prompt: string,
+  route: string
+): CapabilityDescriptor[] {
+  const tokens = capabilityTokens(prompt)
+  const routeDomain = route.split('/')[1]
+  return catalog
+    .map((item, index) => {
+      const haystack = `${item.id} ${item.domain} ${item.name} ${item.description}`.toLocaleLowerCase()
+      const tokenScore = tokens.reduce((score, token) => score + (haystack.includes(token) ? 1 : 0), 0)
+      const routeScore = routeDomain && item.domain === routeDomain ? 2 : 0
+      const queryScore = ['query.search', 'query.entities'].includes(item.id) ? 1 : 0
+      return { item, index, score: tokenScore + routeScore + queryScore }
+    })
+    .filter(({ score }) => score > 0)
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, 14)
+    .map(({ item }) => item)
+}
+
 export class AgentOrchestrator {
   readonly #sessions = new Map<string, SessionState>()
 
@@ -164,14 +195,17 @@ export class AgentOrchestrator {
     })
     this.progress(options, { type: 'started', commandRunId: token.id })
     const session = this.#sessions.get(input.sessionId) ?? { messages: [], recent: [] }
-    const starterCapabilities = [
-      ...this.registry.list({ domain: 'query', limit: 4 }),
-      ...this.registry.list({ domain: input.context.currentRoute.split('/')[1] || 'query', limit: 4 })
-    ]
+    const capabilityCatalog = this.registry.list({ limit: 250 })
+    const starterCapabilities = relevantCapabilities(
+      capabilityCatalog,
+      input.prompt,
+      input.context.currentRoute
+    )
     const instructions = buildAgentInstructions({
       context: input.context,
       recent: session.recent,
       starterCapabilities,
+      capabilityCatalog,
       presetName: input.preset.name,
       model: input.preset.model
     })
