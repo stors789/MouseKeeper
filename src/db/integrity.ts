@@ -302,7 +302,8 @@ export async function scanIntegrity(
 
     const mouseById = new Map(mice.map(mouse => [mouse.id, mouse]))
     const mouseIds = new Set(mouseById.keys())
-    const cageIds = new Set(cages.map(cage => cage.id))
+    const cageById = new Map(cages.map(cage => [cage.id, cage]))
+    const cageIds = new Set(cageById.keys())
     const breedingPairById = new Map(
       breedingPairs.map(pair => [pair.id, pair])
     )
@@ -322,7 +323,8 @@ export async function scanIntegrity(
         ['sire', mouse.sireId],
         ['dam', mouse.damId]
       ] as const) {
-        if (parentId && !mouseById.has(parentId)) {
+        const parent = parentId ? mouseById.get(parentId) : undefined
+        if (parentId && !parent) {
           issues.push({
             severity: 'error',
             code: `missing-${role}`,
@@ -330,6 +332,19 @@ export async function scanIntegrity(
             recordId: mouse.id,
             relatedIds: [parentId],
             message: `Mouse references missing ${role} ${parentId}`
+          })
+        } else if (
+          parent?.birthDate &&
+          mouse.birthDate &&
+          mouse.birthDate < parent.birthDate
+        ) {
+          issues.push({
+            severity: 'error',
+            code: 'parent-after-offspring',
+            table: 'mice',
+            recordId: mouse.id,
+            relatedIds: [parent.id],
+            message: `Mouse birth date precedes ${role} birth date`
           })
         }
       }
@@ -380,7 +395,8 @@ export async function scanIntegrity(
         ['sire', pair.sireId],
         ['dam', pair.damId]
       ] as const) {
-        if (!mouseIds.has(mouseId)) {
+        const parent = mouseById.get(mouseId)
+        if (!parent) {
           issues.push({
             severity: 'error',
             code: `missing-${role}`,
@@ -388,6 +404,18 @@ export async function scanIntegrity(
             recordId: pair.id,
             relatedIds: [mouseId],
             message: `Breeding pair references missing ${role} ${mouseId}`
+          })
+        } else if (
+          parent.birthDate &&
+          pair.pairedOn < parent.birthDate
+        ) {
+          issues.push({
+            severity: 'error',
+            code: 'breeding-before-parent-birth',
+            table: 'breedingPairs',
+            recordId: pair.id,
+            relatedIds: [parent.id],
+            message: `Breeding pair date precedes ${role} birth date`
           })
         }
       }
@@ -456,6 +484,17 @@ export async function scanIntegrity(
         })
       }
       if (assignment.activeFlag === 1 && assignment.deletedFlag === 0) {
+        const cage = cageById.get(assignment.cageId)
+        if (cage?.status === 'inactive' || cage?.status === 'retired') {
+          issues.push({
+            severity: 'error',
+            code: 'active-assignment-in-unavailable-cage',
+            table: 'cageAssignments',
+            recordId: assignment.id,
+            relatedIds: [cage.id],
+            message: 'Active cage assignment references an inactive or retired cage'
+          })
+        }
         const previous = activeAssignmentByMouse.get(assignment.mouseId)
         if (previous) {
           issues.push({

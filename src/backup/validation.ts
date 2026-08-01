@@ -516,6 +516,29 @@ function validateReferences(data: BackupData): BackupIssue[] {
       mouse.sireId,
       'mice'
     )
+    for (const [role, parentId] of [
+      ['sire', mouse.sireId],
+      ['dam', mouse.damId]
+    ] as const) {
+      const parent = parentId ? mouseById.get(parentId) : undefined
+      if (
+        parent?.birthDate &&
+        mouse.birthDate &&
+        mouse.birthDate < parent.birthDate
+      ) {
+        issues.push(
+          issue(
+            'relation-mismatch',
+            `Mouse birth date precedes ${role} birth date`,
+            {
+              table: 'mice',
+              recordId: mouse.id,
+              relatedIds: [parent.id]
+            }
+          )
+        )
+      }
+    }
     checkReference(
       issues,
       mouseIds,
@@ -648,6 +671,20 @@ function validateReferences(data: BackupData): BackupIssue[] {
           )
         )
       }
+      const cage = cageById.get(assignment.cageId)
+      if (cage?.status === 'inactive' || cage?.status === 'retired') {
+        issues.push(
+          issue(
+            'relation-mismatch',
+            'An active cage assignment cannot reference an inactive or retired cage',
+            {
+              table: 'cageAssignments',
+              recordId: assignment.id,
+              relatedIds: [cage.id]
+            }
+          )
+        )
+      }
     }
   }
 
@@ -703,6 +740,25 @@ function validateReferences(data: BackupData): BackupIssue[] {
       pair.damId,
       'mice'
     )
+    for (const [role, parentId] of [
+      ['sire', pair.sireId],
+      ['dam', pair.damId]
+    ] as const) {
+      const parent = mouseById.get(parentId)
+      if (parent?.birthDate && pair.pairedOn < parent.birthDate) {
+        issues.push(
+          issue(
+            'relation-mismatch',
+            `Breeding pair date precedes ${role} birth date`,
+            {
+              table: 'breedingPairs',
+              recordId: pair.id,
+              relatedIds: [parent.id]
+            }
+          )
+        )
+      }
+    }
   }
 
   for (const litter of data.litters) {

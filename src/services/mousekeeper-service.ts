@@ -516,6 +516,25 @@ export class MouseKeeperService {
       }
     }
 
+    if (mouse.birthDate) {
+      const invalidChild = await this.database.mice
+        .filter(
+          candidate =>
+            candidate.deletedFlag === 0 &&
+            (candidate.sireId === mouse.id || candidate.damId === mouse.id) &&
+            candidate.birthDate !== undefined &&
+            compareLocalDates(candidate.birthDate, mouse.birthDate!) < 0
+        )
+        .first()
+      if (invalidChild) {
+        throw new ServiceError(
+          'invalid-state',
+          'A parent birth date cannot be after an existing offspring birth date',
+          { mouseId: mouse.id, offspringId: invalidChild.id }
+        )
+      }
+    }
+
     for (const tagId of mouse.tagIds) {
       await this.activeRecord(this.database.tags, tagId, 'Tag')
     }
@@ -1182,6 +1201,17 @@ export class MouseKeeperService {
           .equals([current.id, 1])
           .count()
         const maxCapacity = input.patch.maxCapacity ?? current.maxCapacity
+        const nextStatus = input.patch.status ?? current.status
+        if (
+          occupancy > 0 &&
+          (nextStatus === 'inactive' || nextStatus === 'retired')
+        ) {
+          throw new ServiceError(
+            'invalid-state',
+            'Move all active mice before making a cage inactive or retired',
+            { occupancy }
+          )
+        }
         const warnings = warningList([
           occupancy > maxCapacity && WARNING_CODES.cageCapacityExceeded
         ])
@@ -1220,7 +1250,7 @@ export class MouseKeeperService {
             'purpose' in input.patch
               ? withoutEmpty(input.patch.purpose)
               : current.purpose,
-          status: input.patch.status ?? current.status,
+          status: nextStatus,
           notes:
             'notes' in input.patch
               ? input.patch.notes ?? undefined
@@ -1718,6 +1748,18 @@ export class MouseKeeperService {
             'Sire and dam must be different mice'
           )
         }
+        for (const parent of [sire, dam]) {
+          if (
+            parent.birthDate &&
+            compareLocalDates(input.pairedOn, parent.birthDate) < 0
+          ) {
+            throw new ServiceError(
+              'invalid-state',
+              'Breeding pair date cannot precede a parent birth date',
+              { parentId: parent.id }
+            )
+          }
+        }
         const status = input.status ?? 'active'
         const current = CURRENT_BREEDING_STATUSES.has(status)
         const activePairKey = current
@@ -1789,7 +1831,11 @@ export class MouseKeeperService {
     const action = 'breeding-pair.update'
     return this.database.transaction(
       'rw',
-      [this.database.breedingPairs, this.database.activityLogs],
+      [
+        this.database.mice,
+        this.database.breedingPairs,
+        this.database.activityLogs
+      ],
       async () => {
         const replay = await this.operationLog(input.operationId, action)
         if (replay) {
@@ -1838,12 +1884,40 @@ export class MouseKeeperService {
           }
         }
 
+        const pairedOn = input.patch.pairedOn ?? current.pairedOn
+        const parents = await this.database.mice.bulkGet([
+          current.sireId,
+          current.damId
+        ])
+        for (const [index, parent] of parents.entries()) {
+          if (!parent) {
+            throw new ServiceError(
+              'integrity-error',
+              'Breeding pair references a missing parent',
+              {
+                parentId:
+                  index === 0 ? current.sireId : current.damId
+              }
+            )
+          }
+          if (
+            parent.birthDate &&
+            compareLocalDates(pairedOn, parent.birthDate) < 0
+          ) {
+            throw new ServiceError(
+              'invalid-state',
+              'Breeding pair date cannot precede a parent birth date',
+              { parentId: parent.id }
+            )
+          }
+        }
+
         const now = resolveNow(input)
         const next: BreedingPair = breedingPairSchema.parse({
           ...current,
           revision: current.revision + 1,
           updatedAt: now,
-          pairedOn: input.patch.pairedOn ?? current.pairedOn,
+          pairedOn,
           separatedOn: CURRENT_BREEDING_STATUSES.has(status)
             ? undefined
             : input.patch.separatedOn === null

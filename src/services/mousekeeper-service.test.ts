@@ -113,6 +113,15 @@ describe('MouseKeeperService', () => {
       mouseId: firstMouse.id,
       cageId: firstCage.id
     })
+    await expect(
+      service.updateCage({
+        operationId: operationId('retire-occupied-cage'),
+        now: NOW,
+        cageId: firstCage.id,
+        expectedRevision: firstCage.revision,
+        patch: { status: 'retired' }
+      })
+    ).rejects.toMatchObject({ code: 'invalid-state' })
     const overCapacityInput = {
       operationId: operationId('move-over'),
       now: NOW,
@@ -382,6 +391,15 @@ describe('MouseKeeperService', () => {
     })
     await expect(
       service.updateMouse({
+        operationId: operationId('parent-after-child'),
+        now: NOW,
+        mouseId: ancestor.id,
+        expectedRevision: ancestor.revision,
+        patch: { birthDate: '2024-01-02' }
+      })
+    ).rejects.toMatchObject({ code: 'invalid-state' })
+    await expect(
+      service.updateMouse({
         operationId: operationId('cycle'),
         now: NOW,
         mouseId: ancestor.id,
@@ -486,6 +504,15 @@ describe('MouseKeeperService', () => {
       sex: 'female',
       birthDate: '2025-01-01'
     })
+    await expect(
+      service.createBreedingPair({
+        operationId: operationId('pair-before-parent-birth'),
+        now: NOW,
+        sireId: sire.id,
+        damId: dam.id,
+        pairedOn: '2024-12-31'
+      })
+    ).rejects.toMatchObject({ code: 'invalid-state' })
     await expect(
       service.createBreedingPair({
         operationId: operationId('bad-delivery'),
@@ -1032,6 +1059,55 @@ describe('MouseKeeperService', () => {
     const report = await scanIntegrity(database)
     expect(report.ok).toBe(true)
     expect(report.issues).toEqual([])
+  })
+
+  it('reports chronology and unavailable-cage relation corruption', async () => {
+    const sire = await createMouse('SCAN-SIRE', {
+      sex: 'male',
+      birthDate: '2025-01-01'
+    })
+    const dam = await createMouse('SCAN-DAM', {
+      sex: 'female',
+      birthDate: '2025-01-01'
+    })
+    await createMouse('SCAN-CHILD', {
+      sireId: sire.id,
+      birthDate: '2025-06-01'
+    })
+    const pair = (
+      await service.createBreedingPair({
+        operationId: operationId('scan-pair'),
+        now: NOW,
+        sireId: sire.id,
+        damId: dam.id,
+        pairedOn: '2026-01-01'
+      })
+    ).value
+    const cage = await createCage('SCAN-CAGE')
+    const resident = await createMouse('SCAN-RESIDENT')
+    await service.moveMouse({
+      operationId: operationId('scan-move'),
+      now: NOW,
+      mouseId: resident.id,
+      cageId: cage.id
+    })
+
+    await database.mice.update(sire.id, { birthDate: '2025-07-01' })
+    await database.breedingPairs.update(pair.id, {
+      pairedOn: '2024-12-31'
+    })
+    await database.cages.update(cage.id, { status: 'retired' })
+    const report = await scanIntegrity(database)
+
+    expect(report.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'parent-after-offspring' }),
+        expect.objectContaining({ code: 'breeding-before-parent-birth' }),
+        expect.objectContaining({
+          code: 'active-assignment-in-unavailable-cage'
+        })
+      ])
+    )
   })
 
   it('reports dangling secondary relations during integrity scans', async () => {
