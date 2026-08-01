@@ -16,3 +16,11 @@ export function commandStatusLabel(run: AgentCommandRun): string {
   if (run.status === 'undo-conflict') return '撤回冲突'
   return '失败'
 }
+
+export function prependBoundedRun<T extends { commandRun: Pick<AgentCommandRun, 'id'> }>(
+  current: readonly T[],
+  next: T,
+  limit = 40
+): T[] {
+  return [next, ...current.filter((item) => item.commandRun.id !== next.commandRun.id)].slice(0, limit)
+}

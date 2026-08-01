@@ -1,8 +1,8 @@
 import type { CapabilityToolDefinition } from '../../application'
 import { CHAT_COMPATIBLE_CAPABILITIES, OPENAI_RESPONSES_CAPABILITIES, createDefaultProviderSettings } from './defaults'
 import { ProviderClient } from './client'
-import { parseChatJson, parseOpenAiStream, parseResponsesJson } from './parsers'
-import { buildGenerationRequest, buildModelsRequest, joinProviderUrl } from './request-builders'
+import { parseChatJson, parseOpenAiStream, parseProviderStream, parseResponsesJson } from './parsers'
+import { applyContextStrategy, buildGenerationRequest, buildModelsRequest, joinProviderUrl } from './request-builders'
 import { SecretStore } from './secret-store'
 import type { LLMPreset, NormalizedLLMRequest, ProviderProfile } from './types'
 import { ProviderError } from './types'
@@ -264,12 +264,61 @@ describe('Provider request mapping', () => {
     expect(messages.map((message) => message.content)).toEqual(['固定系统规则', 'new', 'new done'])
   })
 
+  it('MAP-024b preserves an oversized latest tool turn instead of emitting an orphan tool result', () => {
+    const { profile, preset, secrets } = fixtures('compatible-chat-completions')
+    preset.historyLimit = 2
+    preset.contextStrategy = 'drop-oldest'
+    const input: NormalizedLLMRequest = {
+      ...normalized,
+      messages: [
+        { role: 'user', content: 'current' },
+        { role: 'assistant', content: '', toolCalls: [{ id: 'current-call', name: 'execute_capability', arguments: {}, rawArguments: '{}' }] },
+        { role: 'tool', content: '{"ok":true}', toolCallId: 'current-call' },
+        { role: 'assistant', content: 'done' }
+      ]
+    }
+    const messages = bodyOf(profile, preset, secrets, input).body.messages as Array<Record<string, unknown>>
+    expect(messages.slice(1).map((message) => message.role)).toEqual(['user', 'assistant', 'tool', 'assistant'])
+    expect((messages[2]?.tool_calls as Array<{ id: string }>)[0]?.id).toBe('current-call')
+    expect(messages[3]?.tool_call_id).toBe('current-call')
+  })
+
   it('MAP-025 preserves the current message when context strategy is drop-oldest', () => {
     const { profile, preset, secrets } = fixtures()
     preset.historyLimit = 1
     preset.contextStrategy = 'drop-oldest'
     const input = { ...normalized, messages: [{ role: 'user' as const, content: '当前指令' }] }
     expect(JSON.stringify(bodyOf(profile, preset, secrets, input).body)).toContain('当前指令')
+  })
+
+  it('implements fail context strategy locally before issuing a request', () => {
+    const { profile, preset, secrets } = fixtures()
+    preset.historyLimit = 2
+    preset.contextStrategy = 'fail'
+    const input: NormalizedLLMRequest = {
+      ...normalized,
+      messages: [
+        { role: 'user', content: 'old' },
+        { role: 'assistant', content: 'old answer' },
+        { role: 'user', content: 'current' }
+      ]
+    }
+    expect(() => bodyOf(profile, preset, secrets, input)).toThrow('超过本地上限')
+  })
+
+  it('summarizes dropped complete turns with a labeled local excerpt and keeps tool turns intact', () => {
+    const messages: NormalizedLLMRequest['messages'] = [
+      { role: 'user', content: 'old request' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'old-call', name: 'query.entities', arguments: {}, rawArguments: '{}' }] },
+      { role: 'tool', content: '{"old":true}', toolCallId: 'old-call' },
+      { role: 'assistant', content: 'old done' },
+      { role: 'user', content: 'current request' },
+      { role: 'assistant', content: 'current answer' }
+    ]
+    const prepared = applyContextStrategy(messages, 3, 'summarize-then-trim')
+    expect(prepared[0]?.content).toContain('本地历史摘要')
+    expect(prepared[0]?.content).toContain('工具 old-call')
+    expect(prepared.slice(1).map((message) => message.content)).toEqual(['current request', 'current answer'])
   })
 
   it('MAP-026 appends custom system instructions for Responses', () => {
@@ -370,9 +419,78 @@ describe('Provider parsers and failures', () => {
     await expect(parseOpenAiStream(response, 'compatible-chat-completions', effective)).resolves.toMatchObject({ text: 'OK' })
   })
 
+  it('streams Responses text deltas through ProviderClient before completion', async () => {
+    const { profile, preset, secrets } = fixtures()
+    preset.stream = true
+    const seen: string[] = []
+    const fakeFetch = (() => Promise.resolve(sse([
+      'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"先"}\n\n',
+      'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"做"}\n\n',
+      'event: response.completed\ndata: {"type":"response.completed"}\n\n'
+    ]))) as typeof fetch
+    const result = await new ProviderClient(secrets, fakeFetch).generate(profile, preset, normalized, undefined, (event) => {
+      if (event.type === 'text-delta') seen.push(event.delta)
+    })
+    expect(seen).toEqual(['先', '做'])
+    expect(result.text).toBe('先做')
+  })
+
+  it('streams Chat text deltas through ProviderClient and requires DONE', async () => {
+    const { profile, preset, secrets } = fixtures('compatible-chat-completions')
+    preset.stream = true
+    const seen: string[] = []
+    const fakeFetch = (() => Promise.resolve(sse([
+      'data: {"id":"chat","choices":[{"delta":{"content":"O"}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"K"}}]}\n\n',
+      'data: [DONE]\n\n'
+    ]))) as typeof fetch
+    const result = await new ProviderClient(secrets, fakeFetch).generate(profile, preset, normalized, undefined, (event) => {
+      if (event.type === 'text-delta') seen.push(event.delta)
+    })
+    expect(seen).toEqual(['O', 'K'])
+    expect(result.text).toBe('OK')
+  })
+
+  it('parses JSONL Chat with a final line that has no newline', async () => {
+    const response = sse([
+      '{"id":"jsonl-chat","choices":[{"delta":{"content":"JSON"}}]}\n',
+      '{"choices":[{"delta":{"content":"L"},"finish_reason":"stop"}]}'
+    ])
+    await expect(parseProviderStream(response, 'compatible-chat-completions', effective, 'jsonl')).resolves.toMatchObject({ text: 'JSONL', finishReason: 'completed' })
+  })
+
+  it('parses JSONL Responses completion and [DONE] semantics', async () => {
+    const deltas: string[] = []
+    const response = sse([
+      '{"type":"response.output_text.delta","delta":"本"}\n',
+      '{"type":"response.output_text.delta","delta":"地"}\n',
+      '[DONE]'
+    ])
+    const result = await parseProviderStream(response, 'compatible-responses', effective, 'jsonl', (event) => {
+      if (event.type === 'text-delta') deltas.push(event.delta)
+    })
+    expect(result.text).toBe('本地')
+    expect(deltas).toEqual(['本', '地'])
+  })
+
   it('rejects an interrupted stream instead of accepting partial text', async () => {
     const response = sse(['data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'])
-    await expect(parseOpenAiStream(response, 'compatible-chat-completions', effective)).rejects.toMatchObject({ kind: 'stream-interrupted' })
+    const events: string[] = []
+    await expect(parseOpenAiStream(response, 'compatible-chat-completions', effective, (event) => events.push(event.type))).rejects.toMatchObject({ kind: 'stream-interrupted' })
+    expect(events).toEqual(['response-started', 'text-delta', 'response-failed'])
+  })
+
+  it('keeps timeout and abort active while consuming a streaming response body', async () => {
+    const { profile, preset, secrets } = fixtures('compatible-chat-completions')
+    preset.stream = true
+    preset.timeoutMs = 5
+    const fakeFetch = ((_url: string | URL | Request, init?: RequestInit) => Promise.resolve(new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'))
+        init?.signal?.addEventListener('abort', () => controller.error(init.signal?.reason), { once: true })
+      }
+    })))) as typeof fetch
+    await expect(new ProviderClient(secrets, fakeFetch).generate(profile, preset, normalized)).rejects.toMatchObject({ kind: 'timeout' })
   })
 
   it('classifies an invalid key without leaking request headers', async () => {

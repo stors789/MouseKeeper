@@ -1,4 +1,4 @@
-import type { EffectiveProviderSettings, NormalizedLLMResult, NormalizedToolCall, ProviderProtocol } from './types'
+import type { EffectiveProviderSettings, NormalizedLLMResult, NormalizedToolCall, ProviderEventListener, ProviderProtocol } from './types'
 import { ProviderError } from './types'
 
 function scalarString(value: unknown, fallback = ''): string {
@@ -92,7 +92,18 @@ interface ChatToolAccumulator { id: string; name: string; arguments: string }
 export async function parseOpenAiStream(
   response: Response,
   protocol: ProviderProtocol,
-  effective: EffectiveProviderSettings
+  effective: EffectiveProviderSettings,
+  onEvent?: ProviderEventListener
+): Promise<NormalizedLLMResult> {
+  return parseProviderStream(response, protocol, effective, 'openai-sse', onEvent)
+}
+
+export async function parseProviderStream(
+  response: Response,
+  protocol: ProviderProtocol,
+  effective: EffectiveProviderSettings,
+  dialect: 'openai-sse' | 'jsonl',
+  onEvent?: ProviderEventListener
 ): Promise<NormalizedLLMResult> {
   if (!response.body) throw new ProviderError('stream-interrupted', 'Provider 没有返回流式响应体')
   const reader = response.body.getReader()
@@ -100,10 +111,23 @@ export async function parseOpenAiStream(
   let buffer = ''
   let text = ''
   let completed = false
+  let started = false
   let responseId: string | undefined
+  let completedResult: NormalizedLLMResult | undefined
   const responsesCalls = new Map<string, { id: string; name: string; arguments: string }>()
   const chatCalls = new Map<number, ChatToolAccumulator>()
 
+  const emitStarted = (id?: string) => {
+    if (started) return
+    started = true
+    onEvent?.({ type: 'response-started', id })
+  }
+  const appendText = (delta: string) => {
+    if (!delta) return
+    text += delta
+    onEvent?.({ type: 'text-delta', delta })
+    if (text.length > 2 * 1024 * 1024) throw new ProviderError('protocol', '流式文本超过 2 MiB 上限')
+  }
   const consume = (data: string, eventName?: string) => {
     if (data === '[DONE]') {
       completed = true
@@ -114,8 +138,14 @@ export async function parseOpenAiStream(
     if (!parsed || typeof parsed !== 'object') return
     const event = parsed as Record<string, unknown>
     const type = typeof event.type === 'string' ? event.type : eventName
+    const eventId = typeof event.id === 'string'
+      ? event.id
+      : event.response && typeof event.response === 'object'
+        ? scalarString((event.response as Record<string, unknown>).id) || undefined
+        : undefined
+    emitStarted(eventId)
     if (protocol !== 'compatible-chat-completions') {
-      if (type === 'response.output_text.delta') text += scalarString(event.delta)
+      if (type === 'response.output_text.delta') appendText(scalarString(event.delta))
       if (type === 'response.output_item.added' && event.item && typeof event.item === 'object') {
         const item = event.item as Record<string, unknown>
         if (item.type === 'function_call') {
@@ -141,10 +171,15 @@ export async function parseOpenAiStream(
         completed = true
         if (event.response && typeof event.response === 'object') {
           const final = parseResponsesJson(event.response, effective)
-          if (final.text || final.toolCalls.length) return final
+          if (final.text || final.toolCalls.length) completedResult = final
         }
       }
-      if (type === 'response.failed' || type === 'error') throw new ProviderError('server', 'Provider 报告流式生成失败')
+      if (type === 'response.failed' || type === 'error') {
+        const error = new ProviderError('server', 'Provider 报告流式生成失败')
+        onEvent?.({ type: 'response-failed', error })
+        throw error
+      }
+      if (event.done === true || type === 'done') completed = true
       if (event.response && typeof event.response === 'object') {
         responseId = scalarString((event.response as Record<string, unknown>).id, responseId) || undefined
       }
@@ -156,7 +191,8 @@ export async function parseOpenAiStream(
       if (!choiceValue || typeof choiceValue !== 'object') continue
       const choice = choiceValue as Record<string, unknown>
       const delta = choice.delta && typeof choice.delta === 'object' ? choice.delta as Record<string, unknown> : {}
-      if (typeof delta.content === 'string') text += delta.content
+      if (typeof delta.content === 'string') appendText(delta.content)
+      if (dialect === 'jsonl' && typeof choice.finish_reason === 'string' && choice.finish_reason) completed = true
       if (Array.isArray(delta.tool_calls)) {
         for (const callValue of delta.tool_calls) {
           if (!callValue || typeof callValue !== 'object') continue
@@ -173,27 +209,43 @@ export async function parseOpenAiStream(
     }
   }
 
+  const consumeSseBlock = (block: string) => {
+    let eventName: string | undefined
+    const dataLines: string[] = []
+    for (const line of block.split(/\r?\n/)) {
+      if (line.startsWith('event:')) eventName = line.slice(6).trim()
+      else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
+    }
+    if (dataLines.length > 0) consume(dataLines.join('\n'), eventName)
+  }
+
   while (true) {
     const { value, done } = await reader.read()
     if (done) break
     buffer += decoder.decode(value, { stream: true })
     if (buffer.length > 2 * 1024 * 1024) throw new ProviderError('protocol', '流式响应缓冲区过大')
-    const blocks = buffer.split(/\r?\n\r?\n/)
-    buffer = blocks.pop() ?? ''
-    for (const block of blocks) {
-      let eventName: string | undefined
-      const dataLines: string[] = []
-      for (const line of block.split(/\r?\n/)) {
-        if (line.startsWith('event:')) eventName = line.slice(6).trim()
-        else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
-      }
-      if (dataLines.length > 0) {
-        const final = consume(dataLines.join('\n'), eventName)
-        if (final) return final
-      }
+    if (dialect === 'openai-sse') {
+      const blocks = buffer.split(/\r?\n\r?\n/)
+      buffer = blocks.pop() ?? ''
+      for (const block of blocks) consumeSseBlock(block)
+    } else {
+      const lines = buffer.split(/\r?\n/)
+      buffer = lines.pop() ?? ''
+      for (const line of lines) if (line.trim()) consume(line.trim())
     }
   }
-  if (!completed) throw new ProviderError('stream-interrupted', '流式响应在完成事件前中断')
+  buffer += decoder.decode()
+  if (dialect === 'jsonl' && buffer.trim()) consume(buffer.trim())
+  else if (dialect === 'openai-sse' && buffer.trim()) consumeSseBlock(buffer)
+  if (!completed) {
+    const error = new ProviderError('stream-interrupted', '流式响应在完成事件前中断')
+    onEvent?.({ type: 'response-failed', error })
+    throw error
+  }
+  if (completedResult) {
+    onEvent?.({ type: 'response-completed', result: completedResult })
+    return completedResult
+  }
   const calls = protocol === 'compatible-chat-completions'
     ? [...chatCalls.values()].map((call) => {
         const parsed = parseArguments(call.arguments)
@@ -203,5 +255,7 @@ export async function parseOpenAiStream(
         const parsed = parseArguments(call.arguments)
         return { id: call.id, name: call.name, arguments: parsed.value, rawArguments: parsed.raw }
       })
-  return { id: responseId, text, toolCalls: calls, finishReason: 'completed', effective }
+  const result = { id: responseId, text, toolCalls: calls, finishReason: 'completed', effective }
+  onEvent?.({ type: 'response-completed', result })
+  return result
 }

@@ -4438,6 +4438,14 @@ kbd {
   line-height: 1.2;
 }
 
+.agent-workspace__header > div,
+.agent-settings__header > div,
+.agent-section-heading > div,
+.agent-settings__panel-heading > div,
+.agent-file-request > span {
+  min-width: 0;
+}
+
 .agent-workspace__header p:last-child,
 .agent-settings__header p:last-child {
   margin-top: 6px;
@@ -4622,6 +4630,8 @@ kbd {
 .agent-live-run__text {
   color: var(--text-muted);
   font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .agent-ledger__empty {
@@ -4977,6 +4987,14 @@ kbd {
   font-size: 11px;
 }
 
+.agent-connection-status span,
+.agent-settings__privacy-note span,
+.agent-settings__header p,
+.agent-file-request small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .agent-connection-status.is-error {
   border-color: var(--critical-border);
   background: var(--critical-bg);
@@ -4995,6 +5013,11 @@ kbd {
 }
 
 @media (max-width: 767px) {
+  .agent-workspace,
+  .agent-settings {
+    padding-inline: 12px;
+  }
+
   .agent-topbar-trigger kbd,
   .agent-topbar-trigger span {
     display: none;

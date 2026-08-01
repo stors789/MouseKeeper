@@ -33,7 +33,7 @@ import { Select } from '../../components/ui/Select'
 import { StatusChip } from '../../components/ui/StatusChip'
 import { Textarea } from '../../components/ui/Textarea'
 import { readableError } from '../../lib/errors'
-import { commandCanUndo, commandHasChanges, commandStatusLabel } from './run-presentation'
+import { commandCanUndo, commandHasChanges, commandStatusLabel, prependBoundedRun } from './run-presentation'
 
 interface RunView {
   commandRun: AgentCommandRun
@@ -110,6 +110,7 @@ export function AgentPage() {
   const [undoing, setUndoing] = useState<string>()
   const [fileBusy, setFileBusy] = useState<string>()
   const abortRef = useRef<AbortController | undefined>(undefined)
+  const activeExecutionRef = useRef<string | undefined>(undefined)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const route = pageContext?.route ?? contextRoute()
   const selected = pageContext ? [...pageContext.selected] : selectedFromRoute(route)
@@ -127,6 +128,7 @@ export function AgentPage() {
   }, [])
 
   const recordProgress = (progress: AgentProgress) => {
+    if (progress.type === 'text-delta') setLiveText(progress.text)
     if (progress.type === 'text') setLiveText(progress.text)
     if (progress.type === 'tool-started') {
       setLiveTraces((current) => [...current, progress.trace])
@@ -143,7 +145,9 @@ export function AgentPage() {
   const execute = async (text: string) => {
     if (!text.trim() || busy || !preset || !profile) return
     const controller = new AbortController()
+    const executionId = crypto.randomUUID()
     abortRef.current = controller
+    activeExecutionRef.current = executionId
     setBusy(true)
     setError(undefined)
     setLiveText('')
@@ -162,13 +166,18 @@ export function AgentPage() {
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           now: new Date().toISOString()
         }
-      }, controller.signal, { onProgress: recordProgress })
-      setRuns((current) => [{ commandRun: result.commandRun, result }, ...current.filter((item) => item.commandRun.id !== result.commandRun.id)])
+      }, controller.signal, {
+        onProgress: (progress) => {
+          if (activeExecutionRef.current === executionId) recordProgress(progress)
+        }
+      })
+      setRuns((current) => prependBoundedRun(current, { commandRun: result.commandRun, result }))
       if (result.status === 'failed') setError(result.error ?? 'Agent 命令没有完成')
       setPrompt('')
     } catch (runError) {
       setError(readableError(runError))
     } finally {
+      if (activeExecutionRef.current === executionId) activeExecutionRef.current = undefined
       abortRef.current = undefined
       setBusy(false)
       setLiveText('')
@@ -274,7 +283,7 @@ export function AgentPage() {
             <div className="agent-composer__footer">
               <span>Enter 执行 · Shift + Enter 换行 · ⌘/Ctrl + J 随时打开</span>
               {busy ? (
-                <Button variant="secondary" leadingIcon={<Square aria-hidden="true" size={14} />} onClick={() => abortRef.current?.abort()}>停止</Button>
+                <Button variant="secondary" leadingIcon={<Square aria-hidden="true" size={14} />} onClick={() => { activeExecutionRef.current = undefined; setLiveText(''); abortRef.current?.abort() }}>停止</Button>
               ) : (
                 <Button disabled={!configured || !prompt.trim()} leadingIcon={<Send aria-hidden="true" size={15} />} onClick={submit}>执行命令</Button>
               )}

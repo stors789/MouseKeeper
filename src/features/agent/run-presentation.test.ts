@@ -1,5 +1,5 @@
 import type { AgentCommandRun } from '../../agent/recovery'
-import { commandCanUndo, commandStatusLabel } from './run-presentation'
+import { commandCanUndo, commandStatusLabel, prependBoundedRun } from './run-presentation'
 
 function run(input: Partial<AgentCommandRun>): AgentCommandRun {
   return {
@@ -24,5 +24,16 @@ describe('Agent failed command presentation', () => {
     const failedRead = run({})
     expect(commandCanUndo(failedRead)).toBe(false)
     expect(commandStatusLabel(failedRead)).toBe('失败')
+  })
+})
+
+describe('Agent in-memory history', () => {
+  it('deduplicates the current command and caps long-lived DOM history', () => {
+    const current = Array.from({ length: 40 }, (_, index) => ({ commandRun: run({ id: `run-${index}` }) }))
+    const next = { commandRun: run({ id: 'run-5', summary: 'updated' }) }
+    const result = prependBoundedRun(current, next)
+    expect(result).toHaveLength(40)
+    expect(result[0]?.commandRun.summary).toBe('updated')
+    expect(result.filter((item) => item.commandRun.id === 'run-5')).toHaveLength(1)
   })
 })
