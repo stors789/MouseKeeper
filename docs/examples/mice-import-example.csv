@@ -1,0 +1,4 @@
+earTag,experimentNumber,name,alias,strain,genotype,sex,birthDate,status,source,coatColor,notes,tags,sireEarTag,damEarTag,cageNumber
+MK-001,EXP-2026-001,Alpha,A1,C57BL/6J,WT,female,2026-01-15,alive,internal,black,baseline animal,cohort-a;baseline,SIRE-001,DAM-001,CAGE-A
+MK-002,EXP-2026-002,Beta,B2,C57BL/6J,Het,male,2026-01-15,reserved,internal,black,"note with, comma",cohort-a,SIRE-001,DAM-001,CAGE-A
+MK-003,,Gamma,,BALB/c,,unknown,2026-02-01,存活,external,white,,incoming,,,

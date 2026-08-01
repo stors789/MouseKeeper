@@ -1,237 +1,121 @@
 # MouseKeeper 架构说明
 
-## 文档状态
+## 1. 当前状态
 
-本文定义 MouseKeeper v1 的目标架构和模块边界，不代表所有模块已经实现。
+本文描述 MouseKeeper v0.1.0 的实际实现，更新于 2026-08-01。最终运行证据记录在 agent-notes/final-test-report.md；已知未验证项记录在 known-limitations.md。
 
-静态检查基线为 2026-07-30 23:46 CST、Git HEAD
-`ffddb3267fdca9f1b90c4dd4cfa91ed8c1498be8`。该基线已经具备 React/Vite
-最小应用壳、集中应用配置、原生 Web App Manifest、原生 Service Worker 和测试工具链；
-业务路由、Dexie schema、服务命令及核心业务页面在该基线中尚未实现。
+MouseKeeper 是单用户、无后端、本地优先的 React PWA。核心业务事实保存在 IndexedDB，localStorage 只保存主题与非关键列表偏好。完整 JSON 是恢复格式，CSV 是交换格式。
 
-文中的关键词：
+## 2. 技术栈
 
-- **已存在**：在上述基线中可由文件静态确认。
-- **设计契约**：v1 实现必须遵守，但仍需代码和测试证明。
-- **待验证**：必须通过运行时、真实浏览器或性能测试确认。
+| 层 | 实现 |
+|---|---|
+| UI | React 19、TypeScript 5.9、Tailwind CSS 4、自定义组件原语与 Radix UI、Lucide |
+| 路由 | Wouter；业务页面按路由懒加载 |
+| 表单 | React Hook Form、Zod、受控 Radix Select |
+| 数据 | Dexie 4 / IndexedDB；dexie-react-hooks 响应式读取 |
+| 文件 | Papa Parse CSV、浏览器 Blob 下载、Web Crypto SHA-256 |
+| 测试 | Vitest、Testing Library、fake-indexeddb、Playwright |
+| PWA | Web App Manifest、原生 Service Worker、构建资产清单 |
 
-## 1. 系统目标
+产品名、版本、数据库名和 schemaVersion 集中在 src/config/app.ts。
 
-MouseKeeper 是面向单个实验人员的本地优先小鼠管理 PWA：
+## 3. 系统边界
 
-- 小鼠、笼位、繁育、实验、事件、体重和任务等业务数据保存在浏览器 IndexedDB；
-- 无登录、后端、云数据库、实时协作或远程账号；
-- 在 Windows、macOS 桌面浏览器上承担完整工作流，在手机上承担查找和常用记录；
-- 安装后可离线打开应用壳，并在离线状态继续访问本地业务数据；
-- 完整 JSON 备份是灾难恢复格式，CSV 是交换格式，不是数据库替代品。
+    用户
+      │
+      ▼
+    React / PWA ─────► IndexedDB（16 张业务表）
+      │                    ▲
+      ├────► localStorage（主题、视图偏好）
+      ├────► JSON/CSV 本地文件
+      └────► Service Worker（仅静态应用壳）
 
-本地优先不等于自动备份。清除浏览器站点数据、浏览器配置损坏或磁盘故障仍可能导致
-数据丢失，产品必须持续如实提醒用户导出备份。
+运行时没有登录、远程 API、云数据库、分析 SDK、远程字体或第三方数据上传。浏览器仍可能按自身策略访问应用部署地址、检查 Service Worker 资源或清理站点存储。
 
-## 2. 当前技术基线
+## 4. 目录与依赖方向
 
-以下内容来自 `package.json`、配置和源码静态检查：
-
-| 范畴 | 当前选择 | 状态 |
-|---|---|---|
-| UI | React 19、TypeScript 5.9、Tailwind CSS 4 | 已存在最小壳 |
-| 构建 | Vite 7，Node `>=20.19` | 已配置 |
-| 路由 | Wouter 3 | 依赖已声明，业务路由待实现 |
-| 本地数据 | Dexie 4、dexie-react-hooks | 依赖已声明，schema 待实现 |
-| 表单校验 | React Hook Form、Zod、resolvers | 依赖已声明，业务表单待实现 |
-| UI 原语 | Radix Dialog/AlertDialog/Select/Tabs 等、Lucide | 依赖已声明 |
-| CSV | Papa Parse | 依赖已声明，导入导出待实现 |
-| 单元/组件测试 | Vitest、Testing Library、jsdom、fake-indexeddb | 已配置；仅有最小 App 测试 |
-| E2E | Playwright，桌面 Chromium 与 Pixel 7 项目 | 已配置；基线中尚无 `e2e/` 用例 |
-| PWA | 本地 manifest + 原生 Service Worker | 已有最小实现；离线、更新、安装待验证 |
-
-应用名称、版本、数据库名和 schemaVersion 已集中在 `src/config/app.ts`。业务代码不得再
-散落硬编码产品名或数据库名。
-
-## 3. 系统上下文
-
-```mermaid
-flowchart LR
-  User["单个实验人员"] --> App["MouseKeeper 浏览器/PWA"]
-  App --> IDB["IndexedDB 业务数据库"]
-  App --> Prefs["localStorage：非关键 UI 偏好"]
-  App --> Files["用户选择的 JSON/CSV 文件"]
-  App --> Notify["可选浏览器本地通知"]
-  SW["原生 Service Worker"] --> Shell["本地应用壳缓存"]
-  SW --> App
-```
-
-约束：
-
-- IndexedDB 是业务数据唯一持久化存储；localStorage 只保存主题、表格密度等非关键偏好。
-- Service Worker 缓存静态应用壳，不复制或代理 IndexedDB 业务事实。
-- 通知权限只在用户主动开启提醒时请求；通知不可用时，应用内任务仍须完整工作。
-- 运行时不依赖远程字体、远程图标、分析脚本或持续在线服务。
-- 文件导入和下载是用户设备上的本地 I/O；应用不能声称备份文件已经安全落盘，除非浏览器
-  API 能确认保存成功。
-
-## 4. 分层与依赖方向
-
-仲裁确定的目标目录如下：
-
-```text
-src/
-  app/             应用组合、路由、providers、错误边界
-  config/          产品名、版本和稳定配置
-  domain/          实体、枚举、Zod schema、纯业务规则
-  db/              Dexie 数据库、v1 stores、查询、migration、完整性扫描
-  services/        事务命令、备份恢复、CSV、示例数据
-  features/        按 dashboard/mice/cages/... 组织页面、表单和查询 hooks
-  components/      无业务写入能力的通用 UI 原语与应用壳
-  test/            共享测试环境、fixture 和 helper
-e2e/               真实浏览器端到端用例
-```
-
-当前基线尚未建立多数目标目录；这是目标结构，不是现状清单。
-
-```mermaid
-flowchart TD
-  App["app：组合与路由"] --> Features["features：业务 UI"]
-  App --> Components["components：通用 UI"]
-  Features --> Components
-  Features --> Services["services：命令与用例"]
-  Features --> Domain["domain：类型与规则"]
-  Services --> Domain
-  Services --> DB["db：Dexie 与查询"]
-  DB --> Domain
-```
+    src/config/          稳定产品配置
+    src/domain/          实体、枚举、Zod、日期、规范化与纯规则
+    src/db/              Dexie stores、生命周期与完整性扫描
+    src/services/        事务性命令、幂等与引用完整性
+    src/backup/          规范 JSON、SHA-256、预检和全表恢复
+    src/import-export/   CSV 解析、映射、逐行提交和导出
+    src/features/        按业务工作区组织的 UI
+    src/components/      通用 UI 与错误边界
+    src/layout/          应用壳、导航、搜索与主题入口
+    src/app/             单例数据库和服务组合
 
 依赖规则：
 
-1. `domain` 不依赖 React、Dexie、浏览器 UI 或具体页面。
-2. `db` 可依赖 `domain`，但不得依赖 `features`。
-3. `services` 组合领域校验与数据库事务，是业务写入的唯一入口。
-4. React 页面、组件和 hooks 不得直接调用 `db.table.put/update/delete/clear`。
-5. 读取应通过命名查询或 repository/query adapter；页面不散落 Dexie 索引细节。
-6. `components` 不导入具体业务 feature 或 service。
-7. 备份、CSV 和示例数据复用同一组 Zod schema 与 service 规则，不建立宽松的旁路写入。
+1. domain 不依赖 React、Dexie 或页面。
+2. db 和 services 依赖 domain；services 是业务写入入口。
+3. features 可通过命名查询或 Dexie useLiveQuery 读取，但写入调用 appService，不能散落 table.put/update/delete。
+4. backup 与 import-export 复用 domain schema 和 services，不能建立宽松旁路。
+5. components 不拥有业务写入能力。
 
-## 5. 写入命令契约
+## 5. 写入模型
 
-所有业务修改以服务层命令表达。建议的命令形状为：
+MouseKeeperService 把跨表动作表达为命令，例如创建并初始分笼、转笼、终结状态、创建窝及后代、加入/退出实验、记录体重、软删除/恢复和示例批次删除。
 
-```ts
-interface CommandEnvelope<TPayload> {
-  operationId: string
-  expectedRevision?: number
-  warningAcknowledgements?: string[]
-  payload: TPayload
-}
-```
+每个写命令遵循以下约束：
 
-- `operationId` 由 UI 第一次提交时生成，重试保持不变；`ActivityLog.operationId` 唯一，
-  从数据层阻止双击、重试和多标签页导致的重复副作用。
-- 编辑命令携带 `expectedRevision`。revision 不一致时返回冲突，不静默覆盖。
-- 服务第一次可返回结构化 warning code；用户确认后用同一 `operationId` 和确认代码重试。
-- 二次提交必须在事务内重新读取现状。容量或 revision 变化会使旧确认失效。
-- 表单禁用提交按钮和防抖只是体验措施，不能代替唯一键、revision 和事务重查。
+- operationId 在 ActivityLog 上唯一；同一请求重放返回已有结果，改变请求内容后复用会拒绝。
+- 可编辑实体使用 revision / expectedRevision，避免静默覆盖旧页面。
+- 需要用户确认的规则返回结构化 warning，确认后在事务内重新读取现状。
+- 跨表事实用单一 Dexie rw 事务写入；任一步失败自动回滚。
+- 快速重复点击由 UI busy 状态、operationId 和唯一 helper key 共同防护。
 
-主要专用命令包括 `moveMouse`、`changeMouseStatus`、
-`createLitterWithOffspring`、`assignMouseToExperiment`、`recordWeight`、
-`softDeleteMouse` 和 `restoreBackup`。终结状态、当前笼位、父母关系不能通过通用
-`updateMouse` 绕过专用规则。
+ActivityLog 是命令审计轨迹，MouseEvent 是发生在小鼠身上的业务事实。两者不可互相替代。
 
-完整事务边界见 [数据模型说明](./data-model.md#7-事务边界)。
+## 6. 读取与派生状态
 
-## 6. 读取、派生状态与 UI 状态
+- 年龄、周龄、逾期、容量、性别/品系分布和仪表盘指标从事实派生，不保存第二份计数。
+- Mouse.currentCageId 是列表查询投影；活动 CageAssignment 是权威关系。服务事务同步两者，完整性扫描检查漂移。
+- WeightRecord 保存数值事实，并与 MouseEvent(type=weight) 一对一配对；创建、删除和恢复均原子执行。
+- Records 中心对全局历史先按时间索引限制 100 条；按小鼠筛选时先走 mouseId/活动引用索引，再排序限制，避免“先截断再筛选”漏历史。
+- 小鼠列表有分页和保存视图；路由级 React.lazy 切分减少首包工作。
 
-- IndexedDB 中保存业务事实和需要进入备份的业务设置。
-- 年龄、周龄、笼位占用、逾期状态和仪表盘计数是派生结果，不作为第二份独立事实维护。
-- `Mouse.currentCageId` 是为 5,000 条列表查询保留的只读投影；活动
-  `CageAssignment` 才是权威来源。投影只能在转笼事务中同步，并可由完整性扫描修复。
-- React Hook Form 管理表单草稿；路由参数和可分享筛选进入 URL；临时弹窗、菜单和选择状态
-  留在组件/feature 内。
-- v1 不引入重量级全局状态库。若未来需要共享状态，应先证明它不是 Dexie 查询、URL 或局部
-  state 能表达的内容。
-- 保存视图只保存筛选、排序、列和密度配置，不保存查询结果快照。
+## 7. 路由与工作区
 
-## 7. 业务模块
+一级工作区包括总览、小鼠、笼位、繁育、实验、记录、任务、数据与安全、设置。子路由提供表单、详情、复制小鼠、批量建档和快速称重。
 
-桌面一级入口为：
+AppShell 提供桌面侧栏、移动导航、全局搜索、创建菜单、跳到主内容和路由后主区域聚焦。每个懒加载边界使用结构化 Skeleton；顶层 ErrorBoundary 在渲染异常时提供恢复入口。
 
-1. 总览；
-2. 小鼠；
-3. 笼位；
-4. 繁育；
-5. 实验；
-6. 记录；
-7. 任务；
-8. 数据与安全；
-9. 设置。
+表单通过 useUnsavedChanges 保护站内链接、浏览器后退和关闭/刷新。危险操作使用确认对话框或确认短语。
 
-移动底栏固定为总览、小鼠、笼位、任务和更多。回收站属于“数据与安全”，不扩大一级导航。
+## 8. 备份与恢复架构
 
-跨模块事实：
+备份包含 16 张表、逐表计数、schema/app 版本、数据库实例 ID 和 canonical SHA-256。普通导出自身也走不受信恢复验证器，防止从已损坏数据库生成“看似正常”的完整备份。唯一例外是事务内精确恢复前副本：它必须忠实保留当前状态，即使当前库已有不一致，因此只封装计数和校验和，不冒充已经通过恢复验证。
 
-- 小鼠状态是单值操作状态，不是实验或繁育关系的替代品；
-- 活跃实验成员从 `ExperimentAssignment` 计算；
-- 活跃繁育成员从 `BreedingPair` 计算；
-- 体重数值和趋势以 `WeightRecord` 为权威，同时在同一事务维护只读的
-  `MouseEvent(type=weight)` 时间线投影；
-- `ActivityLog` 记录应用操作，`MouseEvent` 记录实验对象发生的业务事件。
+恢复分两阶段：
 
-## 8. PWA 与无后端策略
+1. 事务外完成大小、UTF-8、JSON 安全、信封、版本、Zod、校验和、唯一键、关系与派生字段审计。
+2. 验证通过后进入覆盖全部表的单一写事务；在同一事务开始处读取旧状态并完成安全副本摘要，再替换所有表。任何写入失败都会回滚；成功后界面发起该精确恢复前副本的下载，下载失败与数据库提交结果分别报告。
 
-仲裁拒绝了 `vite-plugin-pwa`/Workbox 依赖链，v1 采用：
+详细操作见 backup-and-recovery.md。
 
-- `public/manifest.webmanifest`；
-- `public/sw.js` 原生 Service Worker；
-- 仅生产环境在 `src/main.tsx` 注册；
-- 同源静态资源和导航壳缓存；
-- IndexedDB 继续由页面应用直接访问。
+## 9. CSV 架构
 
-设计契约：
+Papa Parse 负责语法层；MouseImport 校验负责字段映射、枚举、日期和批内/库内重复；MouseImportRunner 对每个合法行开启事务，解析父母、笼位、标签并调用服务创建。错误行不会影响其他行，单行内不会留下部分标签或孤立小鼠。
 
-- 首次在线加载成功后，离线导航应回退到缓存的 `index.html`。
-- 带哈希的构建资产可以运行时缓存；旧 `mousekeeper-shell-*` cache 在 activate 时清理。
-- Service Worker 更新不能与 Dexie schema 升级失配。旧标签页收到
-  `versionchange` 后必须关闭数据库连接并提示刷新。
-- v1 不实现后台同步、服务器推送或远程冲突合并。
-- “可安装”“可离线”和“更新后仍可读旧数据”都必须在生产构建和真实浏览器中验证。
+所有 CSV 导出对电子表格公式前缀做单引号中和，并添加 UTF-8 BOM。
 
-当前 `sw.js` 是最小缓存实现。缓存新构建资产、离线重载、更新切换和安装提示尚无验收证据，
-不能标记为完成。
+## 10. PWA
 
-## 9. 错误与恢复边界
+Vite 构建插件生成 asset-manifest.json。Service Worker 安装时缓存入口、manifest、图标和全部构建资产；导航离线回退到 index.html，运行时只对应用壳和 `/assets/` 静态资源采用 cache-first 并后台刷新。activate 删除旧 mousekeeper-shell-* 缓存并立即接管客户端。
 
-- 页面级错误边界处理渲染异常，但不得把数据库错误转换成“成功”。
-- 写入失败时保留表单输入和当前页面上下文，并提供可执行的重试或导出诊断。
-- 数据库打开或 migration 失败时进入只读恢复页；绝不自动删除旧数据库。
-- `blocked` 应提示关闭其他 MouseKeeper 标签页，不能无限显示加载。
-- `QuotaExceededError`、`ConstraintError`、`AbortError` 和 revision 冲突使用不同的错误码。
-- 完整恢复在事务外完成文件限制、解析、Zod、checksum、版本迁移和引用审计；只有已验证数据
-  才进入覆盖全部 16 表的单一 Dexie `rw` 事务。
-- 历史引用读取返回“已解析 / 已软删除 / 缺失”三态，不把所有异常都显示为空。
+生产环境注册 Service Worker；开发模式不注册。缓存不包含 IndexedDB、导入文件或备份下载。
 
-## 10. 数据安全与隐私边界
+## 11. 数据安全与失败边界
 
-- 默认不发送任何业务数据到网络。
-- 不把备份、真实 CSV、浏览器数据库导出或用户实验数据提交到 Git。
-- 导入文本按纯文本渲染，不能使用未净化的 HTML。
-- CSV 导出对可能被表格软件解释为公式的单元格进行防护。
-- checksum 用于检测意外损坏，不等于签名、加密或来源真实性。
-- ActivityLog 不复制整段长备注的 before/after，避免隐私和存储膨胀。
-- PWA 缓存只包含应用资产，不缓存用户导入文件或下载的备份。
+- Zod 与服务层共同校验日期、枚举、状态、谱系和关联。
+- 活动唯一键用 Dexie 唯一索引表达可由 IndexedDB 强制的部分；其余“外键”规则在服务事务中显式检查。
+- 数据库 blocked/versionchange 会派发事件，旧连接收到 versionchange 后关闭，不自动清库。
+- 完整性扫描只读检查 16 表的 schema、缺失引用、活动唯一关系、谱系环、投影和 Weight/Event 配对。
+- 导入文本通过 React 纯文本渲染，不使用 dangerouslySetInnerHTML。
+- 备份未加密；隐私边界和残余风险见 known-limitations.md。
 
-## 11. 架构验收
+## 12. 性能取舍
 
-v1 发布前至少要有证据证明：
-
-- feature 页面没有绕过 service 直接写 Dexie；
-- 16 张表全部进入 v1 schema、完整备份和恢复事务；
-- 转笼、终结状态、创建后代、实验换组、体重双写、活动对象软删除均通过故障注入测试；
-- 相同 operationId 重试不产生重复记录，revision 冲突不静默覆盖；
-- 刷新、浏览器重启和 PWA 更新后业务数据仍存在；
-- 生产构建可安装并在断网后重载；
-- 数据库 migration 被旧标签页阻塞、失败或配额不足时不清空旧库；
-- 5,000 小鼠、1,000 笼位、50,000 事件、20,000 体重记录下没有常用路径
-  O(n²) 行为；
-- Windows、macOS 桌面和手机宽度的核心流程经过实际验证。
-
-当前文档工作没有执行上述验收。具体测试矩阵见
-[测试与验收说明](./testing.md)。
+索引覆盖活动唯一键、常用状态、日期、关系和搜索词；页面用分页、100 条历史上限与路由切分控制渲染。仪表盘、完整性扫描、全局导出和恢复本质上是线性全库操作，目前未移入 Worker。规模目标与未完成实测见 agent-notes/10_performance_review.md。
