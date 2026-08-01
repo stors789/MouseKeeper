@@ -11,6 +11,8 @@
 
 test:e2e 会先执行生产构建，再用 preview 服务运行 Desktop Chrome 和 Pixel 7 Chromium 项目。失败时保存 trace，失败页面截图；CI 可重试两次，本地不重试。
 
+全局 V8 coverage 门禁为 statements 70%、branches 55%、functions 70%、lines 70%。门禁低于当前实测值，用于阻止无意回退，不代表每个高风险模块都只需达到该比例。
+
 ## 2. 当前自动化覆盖
 
 ### Vitest
