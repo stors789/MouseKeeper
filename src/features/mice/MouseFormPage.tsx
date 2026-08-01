@@ -434,10 +434,15 @@ export function MouseFormPage({
               control={control}
               name="sex"
               render={({ field }) => (
-                <Field id="mouse-sex" label="性别" required>
+                <Field
+                  id="mouse-sex"
+                  label="性别"
+                  required
+                  error={errors.sex?.message}
+                >
                   <Select
+                    key={field.value}
                     ref={field.ref}
-                    name={field.name}
                     onBlur={field.onBlur}
                     options={MOUSE_SEXES.map((value) => ({
                       value,
@@ -504,8 +509,8 @@ export function MouseFormPage({
                 render={({ field }) => (
                   <Field id="mouse-status" label="当前状态" required>
                     <Select
+                      key={field.value}
                       ref={field.ref}
-                      name={field.name}
                       onBlur={field.onBlur}
                       options={MOUSE_STATUSES.map((value) => ({
                         value,
@@ -525,9 +530,9 @@ export function MouseFormPage({
                 render={({ field }) => (
                   <Field id="mouse-cage" label="初始笼位">
                     <Select
+                      key={field.value}
                       ref={field.ref}
                       clearLabel="暂不分配"
-                      name={field.name}
                       onBlur={field.onBlur}
                       placeholder="暂不分配"
                       options={(options?.cages ?? []).map((cage) => ({
@@ -553,9 +558,9 @@ export function MouseFormPage({
               render={({ field }) => (
                 <Field id="mouse-sire" label="父本">
                   <Select
+                    key={field.value}
                     ref={field.ref}
                     clearLabel="未关联"
-                    name={field.name}
                     onBlur={field.onBlur}
                     placeholder="未关联"
                     options={(options?.mice ?? []).map((mouse) => ({
@@ -578,9 +583,9 @@ export function MouseFormPage({
                   error={errors.damId?.message}
                 >
                   <Select
+                    key={field.value}
                     ref={field.ref}
                     clearLabel="未关联"
-                    name={field.name}
                     onBlur={field.onBlur}
                     placeholder="未关联"
                     options={(options?.mice ?? []).map((mouse) => ({

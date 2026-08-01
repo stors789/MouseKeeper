@@ -234,8 +234,8 @@ export function BreedingFormPage() {
                   error={errors.sireId?.message}
                 >
                   <Select
+                    key={field.value}
                     ref={field.ref}
-                    name={field.name}
                     onBlur={field.onBlur}
                     options={(mice ?? [])
                       .filter(
@@ -262,8 +262,8 @@ export function BreedingFormPage() {
                   error={errors.damId?.message}
                 >
                   <Select
+                    key={field.value}
                     ref={field.ref}
-                    name={field.name}
                     onBlur={field.onBlur}
                     options={(mice ?? [])
                       .filter(
@@ -312,8 +312,8 @@ export function BreedingFormPage() {
               render={({ field }) => (
                 <Field id="breeding-status" label="初始状态" required>
                   <Select
+                    key={field.value}
                     ref={field.ref}
-                    name={field.name}
                     onBlur={field.onBlur}
                     options={(['planned', 'active'] as const).map((value) => ({
                       value,
