@@ -16,6 +16,7 @@ import { scanIntegrity, type IntegrityReport } from '../../db'
 import { useTheme } from '../../hooks/useTheme'
 import type { ThemePreference } from '../../hooks/themeContext'
 import { readableError } from '../../lib/errors'
+import { AgentSettingsPanel } from './AgentSettingsPanel'
 
 const THEME_OPTIONS = [
   { value: 'system', label: '跟随系统' },
@@ -224,6 +225,7 @@ export function SettingsPage() {
           ) : null}
         </section>
       </div>
+      <AgentSettingsPanel />
     </div>
   )
 }
