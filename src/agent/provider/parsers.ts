@@ -1,6 +1,12 @@
 import type { EffectiveProviderSettings, NormalizedLLMResult, NormalizedToolCall, ProviderProtocol } from './types'
 import { ProviderError } from './types'
 
+function scalarString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' || typeof value === 'number'
+    ? String(value)
+    : fallback
+}
+
 function parseArguments(raw: unknown): { raw: string; value: Record<string, unknown> } {
   const text = typeof raw === 'string' ? raw : '{}'
   try {
@@ -15,8 +21,8 @@ function parseArguments(raw: unknown): { raw: string; value: Record<string, unkn
 function responseToolCall(item: Record<string, unknown>): NormalizedToolCall {
   const parsed = parseArguments(item.arguments)
   return {
-    id: String(item.call_id ?? item.id ?? crypto.randomUUID()),
-    name: String(item.name ?? ''),
+    id: scalarString(item.call_id, scalarString(item.id, crypto.randomUUID())),
+    name: scalarString(item.name),
     arguments: parsed.value,
     rawArguments: parsed.raw
   }
@@ -30,7 +36,7 @@ export function parseResponsesJson(value: unknown, effective: EffectiveProviderS
     if (item.type !== 'message' || !Array.isArray(item.content)) return []
     return item.content.flatMap((content) =>
       content && typeof content === 'object' && (content as Record<string, unknown>).type === 'output_text'
-        ? [String((content as Record<string, unknown>).text ?? '')]
+        ? [scalarString((content as Record<string, unknown>).text)]
         : []
     )
   }).join('')
@@ -63,7 +69,7 @@ export function parseChatJson(value: unknown, effective: EffectiveProviderSettin
         const call = item as Record<string, unknown>
         const fn = call.function && typeof call.function === 'object' ? call.function as Record<string, unknown> : {}
         const parsed = parseArguments(fn.arguments)
-        return [{ id: String(call.id ?? crypto.randomUUID()), name: String(fn.name ?? ''), arguments: parsed.value, rawArguments: parsed.raw }]
+        return [{ id: scalarString(call.id, crypto.randomUUID()), name: scalarString(fn.name), arguments: parsed.value, rawArguments: parsed.raw }]
       })
     : []
   const usage = response.usage && typeof response.usage === 'object' ? response.usage as Record<string, unknown> : undefined
@@ -109,18 +115,26 @@ export async function parseOpenAiStream(
     const event = parsed as Record<string, unknown>
     const type = typeof event.type === 'string' ? event.type : eventName
     if (protocol !== 'compatible-chat-completions') {
-      if (type === 'response.output_text.delta') text += String(event.delta ?? '')
+      if (type === 'response.output_text.delta') text += scalarString(event.delta)
       if (type === 'response.output_item.added' && event.item && typeof event.item === 'object') {
         const item = event.item as Record<string, unknown>
         if (item.type === 'function_call') {
-          const key = String(item.id ?? item.call_id ?? responsesCalls.size)
-          responsesCalls.set(key, { id: String(item.call_id ?? item.id ?? key), name: String(item.name ?? ''), arguments: String(item.arguments ?? '') })
+          const key = scalarString(item.id, scalarString(item.call_id, String(responsesCalls.size)))
+          responsesCalls.set(key, {
+            id: scalarString(item.call_id, scalarString(item.id, key)),
+            name: scalarString(item.name),
+            arguments: scalarString(item.arguments)
+          })
         }
       }
       if (type === 'response.function_call_arguments.delta') {
-        const key = String(event.item_id ?? event.call_id ?? '')
-        const call = responsesCalls.get(key) ?? { id: String(event.call_id ?? key), name: String(event.name ?? ''), arguments: '' }
-        call.arguments += String(event.delta ?? '')
+        const key = scalarString(event.item_id, scalarString(event.call_id))
+        const call = responsesCalls.get(key) ?? {
+          id: scalarString(event.call_id, key),
+          name: scalarString(event.name),
+          arguments: ''
+        }
+        call.arguments += scalarString(event.delta)
         responsesCalls.set(key, call)
       }
       if (type === 'response.completed') {
@@ -131,7 +145,9 @@ export async function parseOpenAiStream(
         }
       }
       if (type === 'response.failed' || type === 'error') throw new ProviderError('server', 'Provider 报告流式生成失败')
-      if (event.response && typeof event.response === 'object') responseId = String((event.response as Record<string, unknown>).id ?? responseId ?? '') || undefined
+      if (event.response && typeof event.response === 'object') {
+        responseId = scalarString((event.response as Record<string, unknown>).id, responseId) || undefined
+      }
       return
     }
     if (typeof event.id === 'string') responseId = event.id

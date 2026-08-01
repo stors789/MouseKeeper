@@ -1,5 +1,5 @@
 import type { CapabilityDescriptor, CapabilityExecutionResult, CapabilityRegistry, EntityReference } from '../../application'
-import type { RecoveryManager, RecoveryStartToken } from '../recovery'
+import type { CommandToolTrace, RecoveryManager, RecoveryStartToken } from '../recovery'
 import type { NormalizedMessage, NormalizedToolCall } from '../provider'
 import { buildAgentInstructions } from './system-prompt'
 import type { AgentModelClient, AgentOrchestratorOptions, AgentProgress, AgentRunInput, AgentRunResult } from './types'
@@ -21,6 +21,12 @@ function safeError(error: unknown): string {
     .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '[已隐藏密钥]')
     .replace(/(authorization|api[-_ ]?key)\s*[:=]\s*\S+/gi, '$1: [已隐藏]')
     .slice(0, 2_000)
+}
+
+function stringArgument(value: unknown, fallback = ''): string {
+  return typeof value === 'string' || typeof value === 'number'
+    ? String(value)
+    : fallback
 }
 
 function uniqueAffected(results: readonly CapabilityExecutionResult[]): EntityReference[] {
@@ -53,15 +59,15 @@ export class AgentOrchestrator {
     input: AgentRunInput,
     token: RecoveryStartToken,
     results: CapabilityExecutionResult[],
-    traces: import('../recovery').CommandToolTrace[],
+    traces: CommandToolTrace[],
     signal: AbortSignal,
     options: AgentOrchestratorOptions
   ): Promise<string> {
     const startedAt = new Date().toISOString()
     const capabilityId = call.name === 'execute_capability'
-      ? String(call.arguments.capabilityId ?? 'unknown')
+      ? stringArgument(call.arguments.capabilityId, 'unknown')
       : call.name
-    const trace: import('../recovery').CommandToolTrace = {
+    const trace: CommandToolTrace = {
       capabilityId,
       startedAt,
       status: 'running'
@@ -84,7 +90,7 @@ export class AgentOrchestrator {
           limit: typeof call.arguments.limit === 'number' ? call.arguments.limit : 20
         })
       } else if (call.name === 'execute_capability') {
-        const id = String(call.arguments.capabilityId ?? '')
+        const id = stringArgument(call.arguments.capabilityId)
         const capabilityInput = call.arguments.input
         const result = await this.registry.execute(id, capabilityInput, {
           actor: 'llm',
@@ -151,7 +157,7 @@ export class AgentOrchestrator {
       { role: 'user', content: input.prompt }
     ]
     const results: CapabilityExecutionResult[] = []
-    const traces: import('../recovery').CommandToolTrace[] = []
+    const traces: CommandToolTrace[] = []
     let finalText = ''
     let rounds = 0
     let lastResponseId: string | undefined

@@ -158,7 +158,7 @@ describe('AgentOrchestrator', () => {
   })
 
   it('includes explicit route, filters, date and recent entities in context', async () => {
-    const model = new ScriptedModel((_input) => ({
+    const model = new ScriptedModel(() => ({
       text: '已查看上下文。',
       toolCalls: [],
       effective: { requested: settings.presets[0]!, omitted: [] }

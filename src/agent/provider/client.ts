@@ -1,6 +1,6 @@
 import { buildGenerationRequest, buildModelsRequest } from './request-builders'
 import { parseChatJson, parseOpenAiStream, parseResponsesJson } from './parsers'
-import type { ConnectionReport, LLMPreset, ModelInfo, NormalizedLLMRequest, NormalizedLLMResult, ProviderProfile } from './types'
+import type { BuiltProviderRequest, ConnectionReport, LLMPreset, ModelInfo, NormalizedLLMRequest, NormalizedLLMResult, ProviderProfile } from './types'
 import { ProviderError } from './types'
 import type { SecretStore } from './secret-store'
 
@@ -52,7 +52,8 @@ async function wait(ms: number, signal?: AbortSignal): Promise<void> {
     const timer = globalThis.setTimeout(resolve, ms)
     const abort = () => {
       globalThis.clearTimeout(timer)
-      reject(signal?.reason ?? new DOMException('Aborted', 'AbortError'))
+      const reason: unknown = signal?.reason
+      reject(reason instanceof Error ? reason : new DOMException('Aborted', 'AbortError'))
     }
     if (signal?.aborted) abort()
     else signal?.addEventListener('abort', abort, { once: true })
@@ -60,7 +61,7 @@ async function wait(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 async function send(
-  request: ReturnType<typeof buildGenerationRequest> | ReturnType<typeof buildModelsRequest>,
+  request: BuiltProviderRequest,
   options: { timeoutMs: number; retries: number; signal?: AbortSignal; fetchImpl: FetchLike }
 ): Promise<Response> {
   for (let attempt = 0; ; attempt += 1) {

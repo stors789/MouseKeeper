@@ -1,8 +1,9 @@
-import { createMouseKeeperDatabase, type MouseKeeperDatabase } from '../../db'
+import type { MouseKeeperDatabase } from '../../db'
+import { createMouseKeeperDatabase } from '../../db'
 import { MouseKeeperService } from '../../services'
 import { CORE_CAPABILITY_DESCRIPTORS } from './catalog'
 import { createCoreCapabilityRegistry } from './core-handlers'
-import { CapabilityRegistry } from './registry'
+import type { CapabilityRegistry } from './registry'
 import type { CapabilityExecutionContext } from './types'
 
 describe('CapabilityRegistry', () => {

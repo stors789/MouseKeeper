@@ -216,14 +216,20 @@ function compareFilter(actual: unknown, expected: unknown): boolean {
   if ('eq' in operators && actual !== operators.eq) return false
   if ('in' in operators && Array.isArray(operators.in) && !operators.in.includes(actual)) return false
   if ('contains' in operators) {
-    const needle = String(operators.contains).toLocaleLowerCase()
+    const needle = comparableString(operators.contains).toLocaleLowerCase()
     if (Array.isArray(actual)) {
-      if (!actual.some((item) => String(item).toLocaleLowerCase().includes(needle))) return false
-    } else if (!String(actual ?? '').toLocaleLowerCase().includes(needle)) return false
+      if (!actual.some((item) => comparableString(item).toLocaleLowerCase().includes(needle))) return false
+    } else if (!comparableString(actual).toLocaleLowerCase().includes(needle)) return false
   }
-  if ('gte' in operators && String(actual ?? '') < String(operators.gte)) return false
-  if ('lte' in operators && String(actual ?? '') > String(operators.lte)) return false
+  if ('gte' in operators && comparableString(actual) < comparableString(operators.gte)) return false
+  if ('lte' in operators && comparableString(actual) > comparableString(operators.lte)) return false
   return true
+}
+
+function comparableString(value: unknown): string {
+  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+    ? String(value)
+    : ''
 }
 
 async function queryEntities(
@@ -233,7 +239,7 @@ async function queryEntities(
   const type = String(input.entityType)
   const tableName = ENTITY_TABLES[type]
   if (!tableName) throw new Error(`不支持的实体类型：${type}`)
-  const table = database.table(tableName) as Table<Record<string, unknown>, string>
+  const table: Table<Record<string, unknown>, string> = database.table(tableName)
   let records = await table.toArray()
   if (input.includeDeleted !== true) {
     records = records.filter((item) => item.deletedFlag !== 1)
@@ -248,7 +254,7 @@ async function queryEntities(
   if (text) records = records.filter((item) => JSON.stringify(item).toLocaleLowerCase().includes(text))
   const sortBy = typeof input.sortBy === 'string' ? input.sortBy : 'updatedAt'
   const direction = input.sortDirection === 'asc' ? 1 : -1
-  records.sort((left, right) => direction * String(left[sortBy] ?? '').localeCompare(String(right[sortBy] ?? '')))
+  records.sort((left, right) => direction * comparableString(left[sortBy]).localeCompare(comparableString(right[sortBy])))
   const total = records.length
   const limit = Math.max(1, Math.min(typeof input.limit === 'number' ? input.limit : 100, 500))
   return { entityType: type, total, truncated: total > limit, records: records.slice(0, limit) }

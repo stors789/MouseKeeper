@@ -237,10 +237,10 @@ describe('Provider request mapping', () => {
     const { profile, preset, secrets } = fixtures()
     preset.retries = 1
     let calls = 0
-    const fakeFetch = (async () => {
+    const fakeFetch = (() => {
       calls += 1
-      if (calls === 1) return new Response('{"error":{"message":"later"}}', { status: 503 })
-      return new Response(JSON.stringify({ id: 'r1', status: 'completed', output: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (calls === 1) return Promise.resolve(new Response('{"error":{"message":"later"}}', { status: 503 }))
+      return Promise.resolve(new Response(JSON.stringify({ id: 'r1', status: 'completed', output: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     }) as typeof fetch
     await new ProviderClient(secrets, fakeFetch).generate(profile, preset, normalized)
     expect(calls).toBe(2)
@@ -316,7 +316,7 @@ describe('Provider request mapping', () => {
 
   it('MAP-031 lists standard models without running tools', async () => {
     const { profile, secrets } = fixtures()
-    const fakeFetch = (async () => new Response(JSON.stringify({ data: [{ id: 'model-a', owned_by: 'lab' }] }), { status: 200 })) as typeof fetch
+    const fakeFetch = (() => Promise.resolve(new Response(JSON.stringify({ data: [{ id: 'model-a', owned_by: 'lab' }] }), { status: 200 }))) as typeof fetch
     await expect(new ProviderClient(secrets, fakeFetch).listModels(profile)).resolves.toEqual([{ id: 'model-a', ownedBy: 'lab' }])
   })
 
@@ -324,9 +324,9 @@ describe('Provider request mapping', () => {
     const { profile, preset, secrets } = fixtures()
     profile.modelsPath = undefined
     const bodies: string[] = []
-    const fakeFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
-      bodies.push(String(init?.body))
-      return new Response(JSON.stringify({ id: 'test-response', status: 'completed', output: [] }), { status: 200 })
+    const fakeFetch = ((_url: string | URL | Request, init?: RequestInit) => {
+      bodies.push(typeof init?.body === 'string' ? init.body : '')
+      return Promise.resolve(new Response(JSON.stringify({ id: 'test-response', status: 'completed', output: [] }), { status: 200 }))
     }) as typeof fetch
     const report = await new ProviderClient(secrets, fakeFetch).testConnection(profile, preset)
     expect(report).toMatchObject({ ok: true, method: 'generation' })
@@ -377,25 +377,25 @@ describe('Provider parsers and failures', () => {
 
   it('classifies an invalid key without leaking request headers', async () => {
     const { profile, preset, secrets } = fixtures()
-    const fakeFetch = (async () => new Response('{"error":{"message":"bad key"}}', { status: 401 })) as typeof fetch
+    const fakeFetch = (() => Promise.resolve(new Response('{"error":{"message":"bad key"}}', { status: 401 }))) as typeof fetch
     await expect(new ProviderClient(secrets, fakeFetch).generate(profile, preset, normalized)).rejects.toMatchObject({ kind: 'auth' })
   })
 
   it('classifies model-not-found responses', async () => {
     const { profile, preset, secrets } = fixtures()
-    const fakeFetch = (async () => new Response('{"error":{"message":"missing model"}}', { status: 404 })) as typeof fetch
+    const fakeFetch = (() => Promise.resolve(new Response('{"error":{"message":"missing model"}}', { status: 404 }))) as typeof fetch
     await expect(new ProviderClient(secrets, fakeFetch).generate(profile, preset, normalized)).rejects.toMatchObject({ kind: 'model-not-found' })
   })
 
   it('classifies context-length failures', async () => {
     const { profile, preset, secrets } = fixtures()
-    const fakeFetch = (async () => new Response('{"error":{"message":"context length exceeded","code":"context_length_exceeded"}}', { status: 400 })) as typeof fetch
+    const fakeFetch = (() => Promise.resolve(new Response('{"error":{"message":"context length exceeded","code":"context_length_exceeded"}}', { status: 400 }))) as typeof fetch
     await expect(new ProviderClient(secrets, fakeFetch).generate(profile, preset, normalized)).rejects.toMatchObject({ kind: 'context-length' })
   })
 
   it('classifies browser fetch failures honestly as network or CORS', async () => {
     const { profile, preset, secrets } = fixtures()
-    const fakeFetch = (async () => { throw new TypeError('Failed to fetch') }) as typeof fetch
+    const fakeFetch = (() => Promise.reject(new TypeError('Failed to fetch'))) as typeof fetch
     await expect(new ProviderClient(secrets, fakeFetch).generate(profile, preset, normalized)).rejects.toMatchObject({ kind: 'network-or-cors' })
   })
 
@@ -403,7 +403,10 @@ describe('Provider parsers and failures', () => {
     const { profile, preset, secrets } = fixtures()
     preset.timeoutMs = 5
     const fakeFetch = ((_url: string | URL | Request, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
-      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true })
+      init?.signal?.addEventListener('abort', () => {
+        const reason: unknown = init.signal?.reason
+        reject(reason instanceof Error ? reason : new DOMException('Aborted', 'AbortError'))
+      }, { once: true })
     })) as typeof fetch
     await expect(new ProviderClient(secrets, fakeFetch).generate(profile, preset, normalized)).rejects.toMatchObject({ kind: 'timeout' })
   })

@@ -213,7 +213,7 @@ export class RecoveryManager {
 
     const conflicts: string[] = []
     for (const change of record.changes) {
-      const current = await this.businessDatabase.table(change.table).get(change.id)
+      const current: unknown = await this.businessDatabase.table(change.table).get(change.id)
       if (!sameRow(current, change.after)) {
         conflicts.push(`${change.table}:${change.id}`)
       }
