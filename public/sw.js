@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mousekeeper-shell-v3'
+const CACHE_NAME = 'mousekeeper-shell-v4'
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -14,6 +14,15 @@ function offlineResponse() {
     status: 503,
     headers: { 'Content-Type': 'text/plain; charset=utf-8' }
   })
+}
+
+function isCacheableStaticRequest(request) {
+  const url = new URL(request.url)
+  if (url.origin !== self.location.origin) return false
+  return (
+    url.pathname.startsWith('/assets/') ||
+    APP_SHELL.includes(url.pathname)
+  )
 }
 
 async function cacheAppShell() {
@@ -83,9 +92,11 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
+  if (!isCacheableStaticRequest(event.request)) return
+
   event.respondWith(
     caches
-      .match(event.request, { ignoreVary: true })
+      .match(event.request)
       .then((cached) => {
         const network = fetch(event.request)
           .then((response) => {
