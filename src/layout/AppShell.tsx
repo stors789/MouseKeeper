@@ -1,4 +1,4 @@
-import { Search } from 'lucide-react'
+import { Bot, Search } from 'lucide-react'
 import {
   lazy,
   Suspense,
@@ -51,6 +51,9 @@ export function AppShell({ children }: AppShellProps) {
 
   useEffect(() => {
     document.title = `${pageTitle} · ${APP_CONFIG.name}`
+    if (location !== '/agent') {
+      window.sessionStorage.setItem('mousekeeper:agent-context-route', location)
+    }
     const frame = requestAnimationFrame(() => {
       document.getElementById('main-content')?.focus()
     })
@@ -131,6 +134,16 @@ export function AppShell({ children }: AppShellProps) {
           <span className="app-topbar__title">{pageTitle}</span>
         </div>
         <div className="app-topbar__actions">
+          <button
+            aria-keyshortcuts="Meta+J Control+J"
+            className="agent-topbar-trigger"
+            type="button"
+            onClick={() => setLocation('/agent')}
+          >
+            <Bot aria-hidden="true" size={17} />
+            <span>Agent</span>
+            <kbd>⌘ J</kbd>
+          </button>
           <button
             aria-label="搜索记录或工作区"
             aria-keyshortcuts="/ Meta+K Control+K"

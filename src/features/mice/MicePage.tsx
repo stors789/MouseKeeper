@@ -13,12 +13,14 @@ import {
 } from 'lucide-react'
 import {
   useDeferredValue,
+  useEffect,
   useMemo,
   useState,
   type ChangeEvent
 } from 'react'
 import { Link } from 'wouter'
 import { appDatabase, appService } from '../../app/runtime'
+import { APPLICATION_EVENT_NAMES, readApplicationViewCommand, viewCommandFromEvent } from '../../application'
 import { Alert } from '../../components/ui/Alert'
 import {
   Button,
@@ -62,6 +64,11 @@ type MouseSort =
   | 'age-youngest'
   | 'age-oldest'
 type BatchAction = 'status' | 'move' | 'tag-add' | 'tag-remove'
+
+const MOUSE_SORTS = new Set<string>([
+  'updated-desc', 'updated-asc', 'label-asc', 'strain-asc',
+  'age-youngest', 'age-oldest'
+])
 
 interface MouseListRecord {
   mouse: Mouse
@@ -182,6 +189,7 @@ function stringValue(
 
 export function MicePage() {
   const { showToast } = useToast()
+  const initialView = useMemo(() => readApplicationViewCommand('mice'), [])
   const data = useLiveQuery(async (): Promise<MiceWorkspaceData> => {
     const [
       mice,
@@ -270,20 +278,20 @@ export function MicePage() {
     }
   }, [])
 
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(() => stringValue(initialView.query) ?? '')
   const deferredQuery = useDeferredValue(normalizeText(query))
-  const [status, setStatus] = useState<MouseStatus | 'all'>('all')
-  const [sex, setSex] = useState<MouseSex | 'all'>('all')
-  const [strain, setStrain] = useState('all')
-  const [genotype, setGenotype] = useState('all')
-  const [cageId, setCageId] = useState('all')
-  const [tagId, setTagId] = useState('all')
-  const [experimentId, setExperimentId] = useState('all')
-  const [birthFrom, setBirthFrom] = useState('')
-  const [birthTo, setBirthTo] = useState('')
-  const [includeDeleted, setIncludeDeleted] = useState(false)
-  const [sort, setSort] = useState<MouseSort>('updated-desc')
-  const [viewMode, setViewMode] = useState<ViewMode>(initialViewMode)
+  const [status, setStatus] = useState<MouseStatus | 'all'>(() => (stringValue(initialView.status, new Set(['all', ...MOUSE_STATUSES])) ?? 'all') as MouseStatus | 'all')
+  const [sex, setSex] = useState<MouseSex | 'all'>(() => (stringValue(initialView.sex, new Set(['all', ...MOUSE_SEXES])) ?? 'all') as MouseSex | 'all')
+  const [strain, setStrain] = useState(() => stringValue(initialView.strain) ?? 'all')
+  const [genotype, setGenotype] = useState(() => stringValue(initialView.genotype) ?? 'all')
+  const [cageId, setCageId] = useState(() => stringValue(initialView.cageId) ?? 'all')
+  const [tagId, setTagId] = useState(() => stringValue(initialView.tagId) ?? 'all')
+  const [experimentId, setExperimentId] = useState(() => stringValue(initialView.experimentId) ?? 'all')
+  const [birthFrom, setBirthFrom] = useState(() => stringValue(initialView.birthFrom) ?? '')
+  const [birthTo, setBirthTo] = useState(() => stringValue(initialView.birthTo) ?? '')
+  const [includeDeleted, setIncludeDeleted] = useState(() => initialView.includeDeleted === true)
+  const [sort, setSort] = useState<MouseSort>(() => (stringValue(initialView.sort, MOUSE_SORTS) ?? 'updated-desc') as MouseSort)
+  const [viewMode, setViewMode] = useState<ViewMode>(() => initialView.viewMode === 'cards' || initialView.viewMode === 'table' ? initialView.viewMode : initialViewMode())
   const [page, setPage] = useState(0)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [batchAction, setBatchAction] = useState<BatchAction>()
@@ -298,6 +306,33 @@ export function MicePage() {
   const [saveViewBusy, setSaveViewBusy] = useState(false)
   const [saveViewError, setSaveViewError] = useState<string>()
   const [activeViewId, setActiveViewId] = useState('')
+
+  useEffect(() => {
+    const handleView = (event: Event) => {
+      const state = viewCommandFromEvent(event, 'mice')
+      if (!state) return
+      const nextStatus = stringValue(state.status, new Set(['all', ...MOUSE_STATUSES]))
+      const nextSex = stringValue(state.sex, new Set(['all', ...MOUSE_SEXES]))
+      const nextSort = stringValue(state.sort, MOUSE_SORTS)
+      if (typeof state.query === 'string') setQuery(state.query)
+      if (nextStatus) setStatus(nextStatus as MouseStatus | 'all')
+      if (nextSex) setSex(nextSex as MouseSex | 'all')
+      if (typeof state.strain === 'string') setStrain(state.strain)
+      if (typeof state.genotype === 'string') setGenotype(state.genotype)
+      if (typeof state.cageId === 'string') setCageId(state.cageId)
+      if (typeof state.tagId === 'string') setTagId(state.tagId)
+      if (typeof state.experimentId === 'string') setExperimentId(state.experimentId)
+      if (typeof state.birthFrom === 'string') setBirthFrom(state.birthFrom)
+      if (typeof state.birthTo === 'string') setBirthTo(state.birthTo)
+      if (typeof state.includeDeleted === 'boolean') setIncludeDeleted(state.includeDeleted)
+      if (nextSort) setSort(nextSort as MouseSort)
+      if (state.viewMode === 'table' || state.viewMode === 'cards') setViewMode(state.viewMode)
+      setPage(0)
+      setActiveViewId('')
+    }
+    globalThis.addEventListener(APPLICATION_EVENT_NAMES.view, handleView)
+    return () => globalThis.removeEventListener(APPLICATION_EVENT_NAMES.view, handleView)
+  }, [])
 
   const strainOptions = useMemo(
     () =>

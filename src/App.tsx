@@ -74,6 +74,9 @@ const DataPage = lazy(async () => ({
 const SettingsPage = lazy(async () => ({
   default: (await import('./features/settings/SettingsPage')).SettingsPage
 }))
+const AgentPage = lazy(async () => ({
+  default: (await import('./features/agent/AgentPage')).AgentPage
+}))
 
 function RouteLoading() {
   return (
@@ -101,6 +104,9 @@ function RoutedContent() {
       </Route>
       <Route path="/dashboard">
         <DashboardContainer />
+      </Route>
+      <Route path="/agent">
+        <AgentPage />
       </Route>
 
       <Route path="/mice/new">
