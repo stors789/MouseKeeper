@@ -10,7 +10,7 @@ import { downloadBlob } from '../../lib/download'
 import { providerClient } from '../../agent/runtime'
 import { providerSettingsStore } from '../../agent/provider/settings-store'
 import { secretStore } from '../../agent/provider/secret-store'
-import type { LLMPreset, ProviderHeader, ProviderProfile, ProviderSettingsDocument, SecretStoragePolicy } from '../../agent/provider/types'
+import { ProviderError, type ConnectionReport, type LLMPreset, type ProviderHeader, type ProviderProfile, type ProviderSettingsDocument, type SecretStoragePolicy } from '../../agent/provider/types'
 import { CHAT_COMPATIBLE_CAPABILITIES, OPENAI_RESPONSES_CAPABILITIES } from '../../agent/provider/defaults'
 import { readableError } from '../../lib/errors'
 
@@ -58,6 +58,7 @@ export function AgentSettingsPanel() {
   const importRef = useRef<HTMLInputElement>(null)
   const profile = settings.profiles.find((item) => item.id === profileId) ?? settings.profiles[0]
   const preset = settings.presets.find((item) => item.id === presetId) ?? settings.presets[0]
+  const connection = profile ? settings.connectionReports[profile.id] : undefined
 
   if (!profile || !preset) return null
 
@@ -179,14 +180,24 @@ export function AgentSettingsPanel() {
     try {
       if (kind === 'models') {
         const models = await providerClient.listModels(profile)
+        const report: ConnectionReport = { ok: true, testedAt: new Date().toISOString(), method: 'models', modelCount: models.length }
+        updateDocument((document) => ({ ...document, connectionReports: { ...document.connectionReports, [profile.id]: report } }))
         setMessage({ tone: 'positive', title: `读取到 ${models.length} 个模型`, detail: models.slice(0, 12).map((item) => item.id).join('、') || '接口可用，但没有返回模型。' })
       } else {
         const report = await providerClient.testConnection(profile, preset)
+        updateDocument((document) => ({ ...document, connectionReports: { ...document.connectionReports, [profile.id]: report } }))
         setMessage(report.ok
           ? { tone: 'positive', title: '连接测试通过', detail: `方式：${report.method}` }
           : { tone: 'critical', title: '连接测试失败', detail: report.error?.message })
       }
     } catch (error) {
+      const report: ConnectionReport = {
+        ok: false,
+        testedAt: new Date().toISOString(),
+        method: kind === 'models' ? 'models' : 'generation',
+        error: { kind: error instanceof ProviderError ? error.kind : 'protocol', message: readableError(error) }
+      }
+      updateDocument((document) => ({ ...document, connectionReports: { ...document.connectionReports, [profile.id]: report } }))
       setMessage({ tone: 'critical', title: '连接操作失败', detail: readableError(error) })
     } finally {
       setBusy(undefined)
@@ -302,6 +313,10 @@ export function AgentSettingsPanel() {
             <Button size="small" variant="secondary" loading={busy === 'models'} leadingIcon={<ListRestart aria-hidden="true" size={15} />} onClick={() => void runConnection('models')}>获取模型列表</Button>
             <Button size="small" loading={busy === 'test'} leadingIcon={<RefreshCw aria-hidden="true" size={15} />} onClick={() => void runConnection('test')}>测试连接</Button>
           </div>
+          {connection ? <p className={`agent-connection-status is-${connection.ok ? 'ok' : 'error'}`}>
+            <strong>{connection.ok ? '最近连接成功' : '最近连接失败'}</strong>
+            <span>{new Date(connection.testedAt).toLocaleString('zh-CN')}{connection.error ? ` · ${connection.error.message}` : connection.modelCount !== undefined ? ` · ${connection.modelCount} 个模型` : ''}</span>
+          </p> : null}
         </div>
 
         <div className="agent-settings__panel">

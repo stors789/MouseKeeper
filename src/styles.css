@@ -4966,6 +4966,23 @@ kbd {
   font-size: 12px;
 }
 
+.agent-connection-status {
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px;
+  border: 1px solid var(--positive-border);
+  border-radius: var(--radius-sm);
+  background: var(--positive-bg);
+  color: var(--positive-fg);
+  font-size: 11px;
+}
+
+.agent-connection-status.is-error {
+  border-color: var(--critical-border);
+  background: var(--critical-bg);
+  color: var(--critical-fg);
+}
+
 @media (max-width: 1023px) {
   .agent-workspace__grid,
   .agent-settings__columns {

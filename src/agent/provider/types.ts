@@ -78,6 +78,7 @@ export interface ProviderSettingsDocument {
   profiles: ProviderProfile[]
   presets: LLMPreset[]
   defaultPresetId: string
+  connectionReports: Record<string, ConnectionReport>
   updatedAt: string
 }
 

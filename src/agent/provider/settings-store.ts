@@ -31,8 +31,8 @@ export class ProviderSettingsStore {
       try {
         const parsed: unknown = JSON.parse(raw) as unknown
         if (isDocument(parsed)) {
-          this.#memory = parsed
-          return clone(parsed)
+          this.#memory = { ...parsed, connectionReports: parsed.connectionReports ?? {} }
+          return clone(this.#memory)
         }
       } catch {
         // Invalid local preferences never block the rest of the application.
@@ -53,16 +53,17 @@ export class ProviderSettingsStore {
     if (!next.presets.some((preset) => preset.id === next.defaultPresetId)) {
       throw new Error('默认预设不存在')
     }
-    const serialized = JSON.stringify(next)
+    const normalized = { ...next, connectionReports: next.connectionReports ?? {} }
+    const serialized = JSON.stringify(normalized)
     if (/\bsk-[A-Za-z0-9_-]{8,}\b/.test(serialized)) {
       throw new Error('Provider 设置不得包含 API Key')
     }
-    if (next.profiles.some((profile) =>
+    if (normalized.profiles.some((profile) =>
       profile.customHeaders.some((header) => header.secret && header.value)
     )) {
       throw new Error('秘密请求头的原文不得进入 Provider 设置')
     }
-    this.#memory = clone(next)
+    this.#memory = clone(normalized)
     this.storage?.setItem(PROVIDER_SETTINGS_STORAGE_KEY, serialized)
     this.#listeners.forEach((listener) => listener())
   }
@@ -99,6 +100,7 @@ export class ProviderSettingsStore {
     const parsed: unknown = JSON.parse(serialized)
     if (!isDocument(parsed)) throw new Error('不是有效的 MouseKeeper LLM 配置')
     const sanitized = clone(parsed)
+    sanitized.connectionReports ??= {}
     sanitized.profiles = sanitized.profiles.map((profile) => ({
       ...profile,
       secretRef: undefined,
