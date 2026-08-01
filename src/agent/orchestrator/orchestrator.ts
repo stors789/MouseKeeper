@@ -91,6 +91,10 @@ export class AgentOrchestrator {
         })
       } else if (call.name === 'execute_capability') {
         const id = stringArgument(call.arguments.capabilityId)
+        const capability = this.registry.get(id)
+        if (capability?.descriptor.modifiesData) {
+          await this.recovery.prepareMutation(token)
+        }
         const capabilityInput = call.arguments.input
         const result = await this.registry.execute(id, capabilityInput, {
           actor: 'llm',
@@ -209,7 +213,7 @@ export class AgentOrchestrator {
       }
       const affected = uniqueAffected(results)
       const capabilityIds = results.map((result) => result.capabilityId)
-      const forceFullBackup = capabilityIds.some((id) => {
+      const forceFullBackup = traces.some(({ capabilityId: id }) => {
         const policy = this.registry.get(id)?.descriptor.recovery
         return policy === 'full-backup'
       })
@@ -241,8 +245,8 @@ export class AgentOrchestrator {
         traces,
         summary: finalText || undefined,
         error: message,
-        forceFullBackup: results.some((result) =>
-          this.registry.get(result.capabilityId)?.descriptor.recovery === 'full-backup'
+        forceFullBackup: traces.some(({ capabilityId }) =>
+          this.registry.get(capabilityId)?.descriptor.recovery === 'full-backup'
         )
       })
       this.progress(options, { type: 'failed', message, commandRun })

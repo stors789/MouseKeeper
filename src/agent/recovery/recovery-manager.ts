@@ -6,6 +6,11 @@ import type { AgentCommandRun, RecoveryFinishInput, RecoveryPreferenceChange, Re
 
 const FULL_BACKUP_ROW_THRESHOLD = 25
 const FULL_BACKUP_TABLE_THRESHOLD = 4
+export const MAX_RETAINED_COMMAND_RUNS = 200
+
+export interface RecoveryManagerOptions {
+  snapshot?: (database: MouseKeeperDatabase) => Promise<BackupData>
+}
 
 function redactPrompt(prompt: string): string {
   return prompt
@@ -45,13 +50,16 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 export async function snapshotBusinessData(database: MouseKeeperDatabase): Promise<BackupData> {
-  const entries = await Promise.all(
-    BACKUP_TABLE_NAMES.map(async (tableName) => [
-      tableName,
-      await database.table(tableName).toArray()
-    ] as const)
-  )
-  return Object.fromEntries(entries) as unknown as BackupData
+  const tables = BACKUP_TABLE_NAMES.map((tableName) => database.table(tableName))
+  return database.transaction('r', tables, async () => {
+    const entries = await Promise.all(
+      BACKUP_TABLE_NAMES.map(async (tableName) => [
+        tableName,
+        await database.table(tableName).toArray()
+      ] as const)
+    )
+    return Object.fromEntries(entries) as unknown as BackupData
+  })
 }
 
 function rowsById(rows: readonly unknown[]): Map<string, Record<string, unknown>> {
@@ -107,10 +115,32 @@ export class RecoveryConflictError extends Error {
 }
 
 export class RecoveryManager {
+  readonly #snapshot: (database: MouseKeeperDatabase) => Promise<BackupData>
+  readonly #preparations = new Map<string, Promise<void>>()
+
   constructor(
     private readonly businessDatabase: MouseKeeperDatabase,
-    private readonly historyDatabase: AgentDatabase
-  ) {}
+    private readonly historyDatabase: AgentDatabase,
+    options: RecoveryManagerOptions = {}
+  ) {
+    this.#snapshot = options.snapshot ?? snapshotBusinessData
+  }
+
+  private async persistAndPrune(record: AgentCommandRun): Promise<void> {
+    await this.historyDatabase.transaction('rw', this.historyDatabase.commandRuns, async () => {
+      await this.historyDatabase.commandRuns.put(record)
+      const records = await this.historyDatabase.commandRuns.orderBy('createdAt').toArray()
+      const excess = records.length - MAX_RETAINED_COMMAND_RUNS
+      if (excess <= 0) return
+      const removableIds = records
+        .filter((candidate) => candidate.status !== 'running')
+        .slice(0, excess)
+        .map((candidate) => candidate.id)
+      if (removableIds.length > 0) {
+        await this.historyDatabase.commandRuns.bulkDelete(removableIds)
+      }
+    })
+  }
 
   async begin(input: {
     id?: string
@@ -126,11 +156,9 @@ export class RecoveryManager {
       prompt: redactPrompt(input.prompt),
       presetId: input.presetId,
       model: input.model,
-      startedAt,
-      before: await snapshotBusinessData(this.businessDatabase),
-      beforePreferences: snapshotPreferences()
+      startedAt
     }
-    await this.historyDatabase.commandRuns.put({
+    await this.persistAndPrune({
       id: token.id,
       sessionId: token.sessionId,
       prompt: token.prompt,
@@ -143,19 +171,49 @@ export class RecoveryManager {
       traces: [],
       changes: [],
       preferenceChanges: [],
-      recoveryKind: 'full-backup',
-      fullBefore: structuredClone(token.before)
+      recoveryKind: 'none'
     })
     return token
   }
 
+  async prepareMutation(token: RecoveryStartToken): Promise<void> {
+    if (token.before) return
+    const existing = this.#preparations.get(token.id)
+    if (existing) return existing
+
+    const preparation = (async () => {
+      const before = await this.#snapshot(this.businessDatabase)
+      const beforePreferences = snapshotPreferences()
+      const preparedAt = new Date().toISOString()
+      const running = await this.historyDatabase.commandRuns.get(token.id)
+      if (!running || running.status !== 'running') {
+        throw new Error('Agent 命令已结束，无法再建立恢复点')
+      }
+      await this.persistAndPrune({
+        ...running,
+        updatedAt: preparedAt,
+        recoveryKind: 'full-backup',
+        fullBefore: structuredClone(before)
+      })
+      token.before = before
+      token.beforePreferences = beforePreferences
+      token.preparedAt = preparedAt
+    })()
+    this.#preparations.set(token.id, preparation)
+    try {
+      await preparation
+    } finally {
+      this.#preparations.delete(token.id)
+    }
+  }
+
   async finish(token: RecoveryStartToken, input: RecoveryFinishInput): Promise<AgentCommandRun> {
-    const after = await snapshotBusinessData(this.businessDatabase)
-    const changes = diffBusinessData(token.before, after)
-    const preferenceChanges = diffPreferences(
-      token.beforePreferences,
-      snapshotPreferences()
-    )
+    const changes = token.before
+      ? diffBusinessData(token.before, await this.#snapshot(this.businessDatabase))
+      : []
+    const preferenceChanges = token.beforePreferences
+      ? diffPreferences(token.beforePreferences, snapshotPreferences())
+      : []
     const changedTables = new Set(changes.map((change) => change.table)).size
     const fullBackup =
       changes.length > 0 &&
@@ -185,9 +243,9 @@ export class RecoveryManager {
           : fullBackup
             ? 'full-backup'
             : 'row-diff',
-      fullBefore: fullBackup ? structuredClone(token.before) : undefined
+      fullBefore: fullBackup && token.before ? structuredClone(token.before) : undefined
     }
-    await this.historyDatabase.commandRuns.put(record)
+    await this.persistAndPrune(record)
     return record
   }
 
@@ -233,7 +291,7 @@ export class RecoveryManager {
         updatedAt: new Date().toISOString(),
         conflictDetails: conflicts
       }
-      await this.historyDatabase.commandRuns.put(updated)
+      await this.persistAndPrune(updated)
       throw new RecoveryConflictError(conflicts)
     }
 
@@ -264,7 +322,7 @@ export class RecoveryManager {
       undoneAt: updatedAt,
       summary: record.summary ? `已撤回：${record.summary}` : '命令已撤回'
     }
-    await this.historyDatabase.commandRuns.put(updated)
+    await this.persistAndPrune(updated)
     return {
       commandRun: updated,
       restoredRows: record.changes.length + record.preferenceChanges.length
