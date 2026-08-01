@@ -1,0 +1,236 @@
+import { backupBlob, createRestorePreview, exportDatabaseBackup, restoreDatabaseBackup } from '../../backup'
+import { scanIntegrity, type MouseKeeperDatabase } from '../../db'
+import { normalizeText } from '../../domain'
+import { createCsvBlob, parseCsvPreview } from '../../import-export/csv'
+import { commitMouseImport } from '../../import-export/mouse-import-runner'
+import { suggestMouseFieldMapping, validateMouseImport, type MouseFieldMapping } from '../../import-export/mouse-import'
+import { downloadBlob } from '../../lib/download'
+import { createPurgePreview, purgeDeletedEntity, type MouseKeeperService, type PurgeEntityType } from '../../services'
+import { buildCsvExport, type CsvExportKind } from '../data'
+import { fileBroker, type FileBroker, type FileWorkflowKind } from '../files'
+import { objectSchema, stringSchema, enumSchema, emptyObjectSchema } from './schema'
+import { createCoreCapabilityRegistry } from './core-handlers'
+import type { CapabilityDescriptor, CapabilityExecutionResult } from './types'
+import type { CapabilityRegistry } from './registry'
+
+export const APPLICATION_EVENT_NAMES = {
+  navigate: 'mousekeeper:application-navigate',
+  focusSearch: 'mousekeeper:application-focus-search',
+  setTheme: 'mousekeeper:application-set-theme',
+  view: 'mousekeeper:application-view-command'
+} as const
+
+function dispatch(name: string, detail: unknown): void {
+  if (typeof globalThis.dispatchEvent === 'function' && typeof globalThis.CustomEvent === 'function') {
+    globalThis.dispatchEvent(new CustomEvent(name, { detail }))
+  }
+}
+
+function timestampFilename(prefix: string, extension: string): string {
+  return `${prefix}-${new Date().toISOString().replaceAll(':', '-').replace(/\.\d{3}Z$/, 'Z')}.${extension}`
+}
+
+function descriptor(input: Partial<CapabilityDescriptor> & Pick<CapabilityDescriptor, 'id' | 'domain' | 'name' | 'description' | 'kind' | 'inputSchema' | 'outputDescription' | 'reads' | 'writes' | 'modifiesData' | 'supportsBatch' | 'risk' | 'recovery' | 'service'>): CapabilityDescriptor {
+  return {
+    version: 1,
+    requiredContext: [],
+    errorTypes: ['validation', 'not-found', 'browser', 'business-rule'],
+    preconditions: [],
+    testLocations: ['src/application/capabilities/extended-handlers.test.ts'],
+    llmExposed: true,
+    ...input
+  }
+}
+
+export const EXTENDED_CAPABILITY_DESCRIPTORS: readonly CapabilityDescriptor[] = [
+  descriptor({
+    id: 'navigation.open', domain: 'navigation', name: '打开页面', description: '通过稳定应用路由打开任意工作区或已知子路由。',
+    kind: 'navigation', inputSchema: objectSchema({ href: stringSchema('必须是以 / 开头的应用内路由') }, ['href']), outputDescription: '打开的路由', reads: [], writes: [], modifiesData: false, supportsBatch: false, risk: 'view-only', recovery: 'none', service: 'NavigationAdapter'
+  }),
+  descriptor({
+    id: 'navigation.open.entity', domain: 'navigation', name: '打开实体详情', description: '打开小鼠、笼位、繁育组合或实验详情。',
+    kind: 'navigation', inputSchema: objectSchema({ entityType: enumSchema(['mouse', 'cage', 'breedingPair', 'experiment']), entityId: stringSchema() }, ['entityType', 'entityId']), outputDescription: '详情路由', reads: [], writes: [], modifiesData: false, supportsBatch: false, risk: 'view-only', recovery: 'none', service: 'NavigationAdapter'
+  }),
+  descriptor({
+    id: 'view.search.focus', domain: 'views', name: '聚焦全局搜索', description: '打开并聚焦全局搜索命令框。',
+    kind: 'view', inputSchema: emptyObjectSchema, outputDescription: '搜索框已打开', reads: [], writes: [], modifiesData: false, supportsBatch: false, risk: 'view-only', recovery: 'none', service: 'ViewStateAdapter'
+  }),
+  descriptor({
+    id: 'view.configure', domain: 'views', name: '设置页面筛选排序和标签', description: '设置小鼠筛选/排序/视图、记录标签、任务范围或数据页标签；页面通过稳定视图事件接收。',
+    kind: 'view', inputSchema: objectSchema({ workspace: enumSchema(['mice', 'records', 'tasks', 'data']), state: objectSchema({}, [], undefined, true) }, ['workspace', 'state']), outputDescription: '已应用的视图状态', reads: [], writes: ['local view state'], modifiesData: true, supportsBatch: true, risk: 'reversible', recovery: 'row-diff', service: 'ViewStateAdapter'
+  }),
+  descriptor({
+    id: 'settings.theme.set', domain: 'settings', name: '切换主题', description: '切换浅色、深色或跟随系统。',
+    kind: 'view', inputSchema: objectSchema({ theme: enumSchema(['light', 'dark', 'system']) }, ['theme']), outputDescription: '实际主题偏好', reads: [], writes: ['localStorage theme preference'], modifiesData: true, supportsBatch: false, risk: 'reversible', recovery: 'row-diff', service: 'ThemeAdapter'
+  }),
+  descriptor({
+    id: 'settings.storage.persist', domain: 'settings', name: '请求持久存储', description: '请求浏览器尽量不要自动清理本地数据库。',
+    kind: 'browser', inputSchema: emptyObjectSchema, outputDescription: '浏览器持久存储结果', reads: ['StorageManager'], writes: ['browser storage policy'], modifiesData: true, supportsBatch: false, risk: 'view-only', recovery: 'browser-managed', service: 'navigator.storage.persist'
+  }),
+  descriptor({
+    id: 'settings.storage.status', domain: 'settings', name: '查看存储状态', description: '查看配额、用量、持久状态、业务记录数和数据库完整性摘要。',
+    kind: 'query', inputSchema: emptyObjectSchema, outputDescription: '存储与数据库状态', reads: ['StorageManager', 'all business tables'], writes: [], modifiesData: false, supportsBatch: false, risk: 'read-only', recovery: 'none', service: 'StorageManager + scanIntegrity'
+  }),
+  descriptor({
+    id: 'data.backup.export', domain: 'data', name: '下载完整备份', description: '验证并下载包含 16 张业务表的完整 JSON 备份；不包含 Agent 密钥。',
+    kind: 'file', inputSchema: emptyObjectSchema, outputDescription: '备份下载产物', reads: ['all business tables'], writes: ['backupMetadata'], modifiesData: true, supportsBatch: false, risk: 'reversible', recovery: 'row-diff', service: 'exportDatabaseBackup'
+  }),
+  descriptor({
+    id: 'data.csv.export', domain: 'data', name: '下载 CSV', description: '导出小鼠、笼位、实验、体重或事件 CSV。',
+    kind: 'file', inputSchema: objectSchema({ kind: enumSchema(['mice', 'cages', 'experiments', 'weights', 'events']) }, ['kind']), outputDescription: 'CSV 下载产物', reads: ['selected business tables'], writes: [], modifiesData: false, supportsBatch: true, risk: 'read-only', recovery: 'none', service: 'buildCsvExport'
+  }),
+  descriptor({
+    id: 'data.file.request', domain: 'data', name: '请求用户选择导入文件', description: '准备 JSON 恢复或 CSV 导入文件流程。浏览器要求用户手势，返回 fileRequestId 后由 Agent 界面显示选择按钮。',
+    kind: 'file', inputSchema: objectSchema({ kind: enumSchema(['backup-restore', 'csv-import']) }, ['kind']), outputDescription: '文件请求及 accept 类型', reads: [], writes: ['ephemeral file broker'], modifiesData: false, supportsBatch: false, risk: 'view-only', recovery: 'none', requiresUserGesture: true, service: 'FileBroker'
+  }),
+  descriptor({
+    id: 'data.backup.restore', domain: 'data', name: '恢复完整备份', description: '使用已由用户选择的 JSON fileRequestId 完成预检、全库恢复和恢复前安全副本下载。',
+    kind: 'file', inputSchema: objectSchema({ fileRequestId: stringSchema() }, ['fileRequestId']), outputDescription: '恢复摘要和安全备份', reads: ['selected File', 'all business tables'], writes: ['all business tables'], modifiesData: true, supportsBatch: true, risk: 'high-impact', recovery: 'full-backup', service: 'restoreDatabaseBackup'
+  }),
+  descriptor({
+    id: 'data.csv.import', domain: 'data', name: '导入小鼠 CSV', description: '使用已由用户选择的 CSV fileRequestId，自动建议或使用给定映射，校验并逐行提交合法记录。',
+    kind: 'file', inputSchema: objectSchema({ fileRequestId: stringSchema(), mapping: objectSchema({}, [], undefined, true) }, ['fileRequestId']), outputDescription: '逐行导入报告', reads: ['selected File', 'mice', 'cages', 'tags'], writes: ['mice', 'tags', 'cageAssignments', 'mouseEvents', 'activityLogs'], modifiesData: true, supportsBatch: true, risk: 'high-impact', recovery: 'full-backup', service: 'commitMouseImport'
+  }),
+  descriptor({
+    id: 'data.purge.preview', domain: 'data', name: '预览永久删除影响', description: '检查回收站实体的引用阻塞和将删除的记录数。',
+    kind: 'query', inputSchema: objectSchema({ entityType: enumSchema(['mouse', 'cage', 'experiment', 'task', 'tag', 'mouseEvent']), entityId: stringSchema() }, ['entityType', 'entityId']), outputDescription: '永久删除预览', reads: ['recycle bin and relationships'], writes: [], modifiesData: false, supportsBatch: false, risk: 'read-only', recovery: 'none', service: 'createPurgePreview'
+  }),
+  descriptor({
+    id: 'data.purge.execute', domain: 'data', name: '永久删除回收站实体', description: '重新预检后永久删除一个回收站实体。执行器会先创建完整恢复点。',
+    kind: 'command', inputSchema: objectSchema({ entityType: enumSchema(['mouse', 'cage', 'experiment', 'task', 'tag', 'mouseEvent']), entityId: stringSchema() }, ['entityType', 'entityId']), outputDescription: '永久删除计数', reads: ['recycle bin and relationships'], writes: ['selected entity and dependencies', 'activityLogs'], modifiesData: true, supportsBatch: false, risk: 'irreversible', recovery: 'full-backup', service: 'purgeDeletedEntity'
+  })
+]
+
+export interface ExtendedCapabilityDependencies {
+  fileBroker?: FileBroker
+}
+
+export function registerExtendedCapabilities(
+  registry: CapabilityRegistry,
+  database: MouseKeeperDatabase,
+  service: MouseKeeperService,
+  dependencies: ExtendedCapabilityDependencies = {}
+): CapabilityRegistry {
+  const files = dependencies.fileBroker ?? fileBroker
+  for (const item of EXTENDED_CAPABILITY_DESCRIPTORS) {
+    registry.register(item, {
+      async execute(input, context): Promise<CapabilityExecutionResult> {
+        if (item.id === 'navigation.open') {
+          const href = String(input.href)
+          if (!href.startsWith('/') || href.startsWith('//')) throw new Error('只能打开应用内路由')
+          dispatch(APPLICATION_EVENT_NAMES.navigate, { href })
+          return { status: 'succeeded', capabilityId: item.id, summary: `已打开 ${href}`, data: { href }, affected: [], warnings: [], modifiesData: false, open: { href, label: '打开页面' } }
+        }
+        if (item.id === 'navigation.open.entity') {
+          const prefixes: Record<string, string> = { mouse: '/mice', cage: '/cages', breedingPair: '/breeding', experiment: '/experiments' }
+          const href = `${prefixes[String(input.entityType)]}/${encodeURIComponent(String(input.entityId))}`
+          dispatch(APPLICATION_EVENT_NAMES.navigate, { href })
+          return { status: 'succeeded', capabilityId: item.id, summary: '已打开记录详情', data: { href }, affected: [], warnings: [], modifiesData: false, open: { href, label: '打开记录' } }
+        }
+        if (item.id === 'view.search.focus') {
+          dispatch(APPLICATION_EVENT_NAMES.focusSearch, {})
+          return { status: 'succeeded', capabilityId: item.id, summary: '已打开全局搜索', affected: [], warnings: [], modifiesData: false }
+        }
+        if (item.id === 'view.configure') {
+          const state = input.state && typeof input.state === 'object' && !Array.isArray(input.state) ? input.state : {}
+          const workspace = String(input.workspace)
+          globalThis.window?.localStorage.setItem(`mousekeeper:view-command:${workspace}`, JSON.stringify(state))
+          dispatch(APPLICATION_EVENT_NAMES.view, { workspace, state })
+          return { status: 'succeeded', capabilityId: item.id, summary: `已更新 ${workspace} 视图`, data: { workspace, state }, affected: [], warnings: [], modifiesData: true }
+        }
+        if (item.id === 'settings.theme.set') {
+          const theme = String(input.theme)
+          globalThis.window?.localStorage.setItem('mousekeeper:theme:v1', theme)
+          dispatch(APPLICATION_EVENT_NAMES.setTheme, { theme })
+          return { status: 'succeeded', capabilityId: item.id, summary: `主题已切换为 ${theme}`, data: { theme }, affected: [], warnings: [], modifiesData: true }
+        }
+        if (item.id === 'settings.storage.persist') {
+          if (!navigator.storage?.persist) throw new Error('当前浏览器不支持持久存储请求')
+          const persistent = await navigator.storage.persist()
+          return { status: 'succeeded', capabilityId: item.id, summary: persistent ? '浏览器已授予持久存储' : '浏览器未授予持久存储', data: { persistent }, affected: [], warnings: [], modifiesData: true }
+        }
+        if (item.id === 'settings.storage.status') {
+          const [estimate, persistent, integrity, counts] = await Promise.all([
+            navigator.storage?.estimate?.(),
+            navigator.storage?.persisted?.(),
+            scanIntegrity(database),
+            Promise.all(database.tables.map((table) => table.count()))
+          ])
+          const data = { estimate, persistent, integrity, tableCount: database.tables.length, recordCount: counts.reduce((sum, count) => sum + count, 0) }
+          return { status: 'succeeded', capabilityId: item.id, summary: integrity.ok ? '存储与完整性状态正常' : `发现 ${integrity.issues.length} 个完整性问题`, data, affected: [], warnings: [], modifiesData: false }
+        }
+        if (item.id === 'data.backup.export') {
+          await service.ensureAppSettings()
+          const backup = await exportDatabaseBackup(database)
+          const blob = backupBlob(backup)
+          const name = timestampFilename('mousekeeper-backup', 'json')
+          downloadBlob(blob, name)
+          return { status: 'succeeded', capabilityId: item.id, summary: `已下载完整备份，共 ${Object.values(backup.tableCounts).reduce((sum, count) => sum + count, 0)} 条记录`, data: { fileName: name, tableCounts: backup.tableCounts, checksum: backup.integrity.canonicalPayloadDigest }, affected: [], artifacts: [{ id: crypto.randomUUID(), name, mediaType: blob.type, size: blob.size, kind: 'download' }], warnings: [], modifiesData: true }
+        }
+        if (item.id === 'data.csv.export') {
+          const kind = String(input.kind) as CsvExportKind
+          const output = await buildCsvExport(database, kind)
+          const blob = createCsvBlob(output.csv)
+          const name = timestampFilename(`mousekeeper-${kind}`, 'csv')
+          downloadBlob(blob, name)
+          return { status: 'succeeded', capabilityId: item.id, summary: `已导出 ${output.rowCount} 行 ${kind} CSV`, data: { kind, rowCount: output.rowCount, fileName: name }, affected: [], artifacts: [{ id: crypto.randomUUID(), name, mediaType: blob.type, size: blob.size, kind: 'download' }], warnings: [], modifiesData: false }
+        }
+        if (item.id === 'data.file.request') {
+          const request = files.request(String(input.kind) as FileWorkflowKind)
+          return { status: 'needs-user-action', capabilityId: item.id, summary: request.kind === 'backup-restore' ? '请选择 MouseKeeper JSON 备份文件' : '请选择小鼠 CSV 文件', data: request, affected: [], artifacts: [{ id: request.id, name: request.kind === 'backup-restore' ? '选择 JSON 备份' : '选择 CSV 文件', mediaType: request.accept, size: 0, kind: 'file-request' }], warnings: ['浏览器要求用户点击文件选择按钮'], modifiesData: false }
+        }
+        if (item.id === 'data.backup.restore') {
+          const file = files.consume(String(input.fileRequestId), 'backup-restore')
+          const preview = await createRestorePreview(file)
+          if (!preview.canRestore) throw new Error(`备份预检失败：${preview.issues.map((issue) => issue.message).join('；')}`)
+          const restored = await restoreDatabaseBackup(database, file)
+          const safetyBlob = backupBlob(restored.preRestoreBackup)
+          const name = timestampFilename('mousekeeper-exact-before-agent-restore', 'json')
+          downloadBlob(safetyBlob, name)
+          return { status: 'succeeded', capabilityId: item.id, summary: `已恢复 ${preview.summary?.totalRecords ?? 0} 条记录，并下载恢复前安全副本`, data: { preview: preview.summary, safetyFileName: name }, affected: [], artifacts: [{ id: crypto.randomUUID(), name, mediaType: safetyBlob.type, size: safetyBlob.size, kind: 'download' }], warnings: [], modifiesData: true }
+        }
+        if (item.id === 'data.csv.import') {
+          const file = files.consume(String(input.fileRequestId), 'csv-import')
+          if (file.size > 20 * 1024 * 1024) throw new Error('CSV 文件超过 20 MB，请拆分后导入')
+          const csv = parseCsvPreview(await file.text())
+          const mapping = input.mapping && typeof input.mapping === 'object' && Object.keys(input.mapping).length > 0
+            ? input.mapping as MouseFieldMapping
+            : suggestMouseFieldMapping(csv.headers)
+          const mice = await database.mice.toArray()
+          const preview = validateMouseImport(csv, mapping, {
+            existingIds: new Set(mice.map((mouse) => normalizeText(mouse.id))),
+            existingEarTags: new Set(mice.flatMap((mouse) => mouse.deletedFlag === 0 && mouse.earTag ? [normalizeText(mouse.earTag)] : []))
+          })
+          if (preview.validCount === 0) throw new Error('CSV 没有可导入的合法行')
+          const report = await commitMouseImport(database, service, preview)
+          return { status: 'succeeded', capabilityId: item.id, summary: `CSV 导入完成：成功 ${report.importedCount}、跳过 ${report.skippedCount}、失败 ${report.failedCount}`, data: report, affected: report.rows.flatMap((row) => row.mouseId ? [{ type: 'mouse', id: row.mouseId, href: `/mice/${row.mouseId}` }] : []), warnings: report.failedCount > 0 ? ['部分 CSV 行导入失败，详情见结果'] : [], modifiesData: true }
+        }
+        if (item.id === 'data.purge.preview') {
+          const preview = await createPurgePreview(database, String(input.entityType) as PurgeEntityType, String(input.entityId))
+          return { status: 'succeeded', capabilityId: item.id, summary: preview.canPurge ? `可永久删除，将删除 ${Object.values(preview.deleteCounts).reduce((sum, count) => sum + count, 0)} 条记录` : `不可永久删除：${preview.blockers.join('；')}`, data: preview, affected: [], warnings: preview.blockers, modifiesData: false }
+        }
+        if (item.id === 'data.purge.execute') {
+          const preview = await createPurgePreview(database, String(input.entityType) as PurgeEntityType, String(input.entityId))
+          if (!preview.canPurge) throw new Error(`仍有引用，不能永久删除：${preview.blockers.join('；')}`)
+          const count = await purgeDeletedEntity(database, preview, context.operationId)
+          return { status: 'succeeded', capabilityId: item.id, summary: `已永久删除 ${count} 条记录；完整恢复点已在执行前创建`, data: { count, preview }, affected: [{ type: preview.entityType, id: preview.entityId, label: preview.label }], warnings: [], modifiesData: true }
+        }
+        throw new Error(`扩展能力没有 handler：${item.id}`)
+      }
+    })
+  }
+  return registry
+}
+
+export function createApplicationCapabilityRegistry(
+  database: MouseKeeperDatabase,
+  service: MouseKeeperService,
+  dependencies?: ExtendedCapabilityDependencies
+): CapabilityRegistry {
+  return registerExtendedCapabilities(
+    createCoreCapabilityRegistry(database, service),
+    database,
+    service,
+    dependencies
+  )
+}
