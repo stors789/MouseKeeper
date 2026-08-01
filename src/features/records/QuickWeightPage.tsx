@@ -27,6 +27,7 @@ import {
   type WeightUnit
 } from '../../domain'
 import { useToast } from '../../hooks/useToast'
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges'
 import { readableError } from '../../lib/errors'
 import { MOUSE_SEX_LABELS } from '../../lib/labels'
 import {
@@ -130,6 +131,9 @@ export function QuickWeightPage() {
         return value.trim() !== '' && Number.isFinite(number) && number > 0
       }).length,
     [drafts]
+  )
+  useUnsavedChanges(
+    !busy && Object.values(drafts).some(value => value.trim() !== '')
   )
 
   const makeEntries = (): RecordWeightsInput['entries'] =>
@@ -367,14 +371,16 @@ export function QuickWeightPage() {
                       {MOUSE_SEX_LABELS[mouse.sex]} · {mouse.strain}
                     </small>
                   </div>
-                  <span role="cell">{cage?.cageNumber ?? '未分笼'}</span>
-                  <span role="cell">
+                  <span data-label="笼位" role="cell">
+                    {cage?.cageNumber ?? '未分笼'}
+                  </span>
+                  <span data-label="上次体重" role="cell">
                     {latest
                       ? `${latest.value} ${latest.unit} · ${latest.measuredOn}`
                       : '无记录'}
                   </span>
                   <label role="cell">
-                    <span className="sr-only">
+                    <span className="responsive-cell-label">
                       {mouseDisplayLabel(mouse)} 本次体重（{unit}）
                     </span>
                     <Input

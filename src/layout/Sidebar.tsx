@@ -69,11 +69,11 @@ export function Sidebar({
                   <li key={item.href}>
                     <Link
                       aria-current={active ? 'page' : undefined}
-                      aria-label={collapsed ? item.label : undefined}
+                      aria-label={item.label}
                       className="app-nav-link"
                       data-active={active || undefined}
                       href={item.href}
-                      title={collapsed ? item.label : undefined}
+                      title={item.label}
                     >
                       <Icon aria-hidden="true" size={19} />
                       <span className="app-nav-link__label">

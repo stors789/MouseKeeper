@@ -294,7 +294,8 @@ export function CageDetailPage({ cageId }: { cageId: string }) {
           aria-label={`笼位 ${cage.cageNumber} 当前容量`}
           aria-valuemin={0}
           aria-valuemax={cage.maxCapacity}
-          aria-valuenow={occupants.length}
+          aria-valuenow={Math.min(occupants.length, cage.maxCapacity)}
+          aria-valuetext={`${occupants.length} / ${cage.maxCapacity}${occupants.length > cage.maxCapacity ? '，已超容' : ''}`}
         >
           <span style={{ width: `${Math.min(occupancyRatio * 100, 100)}%` }} />
         </div>
@@ -311,7 +312,8 @@ export function CageDetailPage({ cageId }: { cageId: string }) {
               <span className="section-total">{occupants.length} 只</span>
             </header>
             {occupants.length > 0 ? (
-              <div className="desktop-record-table">
+              <>
+                <div className="desktop-record-table">
                 <table>
                   <thead>
                     <tr>
@@ -360,7 +362,49 @@ export function CageDetailPage({ cageId }: { cageId: string }) {
                     ))}
                   </tbody>
                 </table>
-              </div>
+                </div>
+                <ul
+                  className="mobile-record-list cage-occupant-mobile"
+                  aria-label="当前笼内小鼠"
+                >
+                {occupants.map(({ mouse }) => (
+                  <li className="mobile-record-card" key={mouse.id}>
+                    <span
+                      className="mobile-record-card__rail"
+                      aria-hidden="true"
+                    />
+                    <div className="mobile-record-card__body">
+                      <div className="mobile-record-card__title">
+                        <Link
+                          href={`/mice/${encodeURIComponent(mouse.id)}`}
+                        >
+                          {mouseDisplayLabel(mouse)}
+                        </Link>
+                        <MouseStatusChip status={mouse.status} />
+                      </div>
+                      <p>
+                        {MOUSE_SEX_LABELS[mouse.sex]} ·{' '}
+                        {formatAgeWeeks(mouse.birthDate)}
+                      </p>
+                      <p>
+                        {mouse.strain} · {mouse.genotype ?? '基因型未记录'}
+                      </p>
+                      <div className="mobile-record-card__meta">
+                        <Button
+                          size="small"
+                          variant="tertiary"
+                          loading={busy === `remove:${mouse.id}`}
+                          leadingIcon={<LogOut aria-hidden="true" size={15} />}
+                          onClick={() => removeMouse(mouse.id)}
+                        >
+                          移出笼位
+                        </Button>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+                </ul>
+              </>
             ) : (
               <EmptyState
                 compact

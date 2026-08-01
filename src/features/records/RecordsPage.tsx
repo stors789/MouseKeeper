@@ -1,13 +1,17 @@
 import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Activity, NotebookPen, Scale } from 'lucide-react'
+import { Activity, NotebookPen, Scale, Search, X } from 'lucide-react'
 import { Link } from 'wouter'
-import { buttonClassName } from '../../components/ui/Button'
+import { Button, buttonClassName } from '../../components/ui/Button'
 import { EmptyState } from '../../components/ui/EmptyState'
+import { Input } from '../../components/ui/Input'
 import { Skeleton, SkeletonGroup } from '../../components/ui/Skeleton'
 import { StatusChip } from '../../components/ui/StatusChip'
 import { db } from '../../db'
-import { mouseDisplayLabel } from '../../domain/normalization'
+import {
+  mouseDisplayLabel,
+  normalizeText
+} from '../../domain/normalization'
 import type { MouseEvent, WeightRecord } from '../../domain/types'
 import { formatInstant, formatWeight } from '../../lib/format'
 import { EVENT_TYPE_LABELS } from '../../lib/labels'
@@ -45,13 +49,71 @@ export function RecordsPage() {
     }
   }, [])
   const [tab, setTab] = useState<RecordsTab>('events')
+  const [query, setQuery] = useState('')
+  const searchParams = new URLSearchParams(window.location.search)
+  const mouseFilter = searchParams.get('mouse') ?? ''
+  const normalizedQuery = normalizeText(query)
+  const filteredEvents = useMemo(
+    () =>
+      data?.events.filter(
+        (event) =>
+          (!mouseFilter || event.mouseId === mouseFilter) &&
+          (!normalizedQuery ||
+            normalizeText(
+              [
+                event.title,
+                event.description,
+                event.snapshot?.mouseLabel,
+                event.snapshot?.cageNumber,
+                event.snapshot?.experimentName
+              ]
+                .filter(Boolean)
+                .join(' ')
+            ).includes(normalizedQuery))
+      ) ?? [],
+    [data?.events, mouseFilter, normalizedQuery]
+  )
+  const filteredWeights = useMemo(
+    () =>
+      data?.weights.filter((weight) => {
+        const mouse = data.mouseById.get(weight.mouseId)
+        return (
+          (!mouseFilter || weight.mouseId === mouseFilter) &&
+          (!normalizedQuery ||
+            normalizeText(
+              `${mouse ? mouseDisplayLabel(mouse) : weight.mouseId} ${weight.notes ?? ''}`
+            ).includes(normalizedQuery))
+        )
+      }) ?? [],
+    [data, mouseFilter, normalizedQuery]
+  )
+  const filteredActivities = useMemo(
+    () =>
+      data?.activities.filter(
+        (activity) =>
+          (!mouseFilter ||
+            activity.primaryEntityKey === `mouse:${mouseFilter}` ||
+            activity.entityRefKeys.includes(`mouse:${mouseFilter}`)) &&
+          (!normalizedQuery ||
+            normalizeText(
+              `${activity.summary} ${activity.action}`
+            ).includes(normalizedQuery))
+      ) ?? [],
+    [data?.activities, mouseFilter, normalizedQuery]
+  )
 
   const count = useMemo(() => {
     if (!data) return 0
-    if (tab === 'events') return data.events.length
-    if (tab === 'weights') return data.weights.length
-    return data.activities.length
-  }, [data, tab])
+    if (tab === 'events') return filteredEvents.length
+    if (tab === 'weights') return filteredWeights.length
+    return filteredActivities.length
+  }, [
+    data,
+    filteredActivities.length,
+    filteredEvents.length,
+    filteredWeights.length,
+    tab
+  ])
 
   return (
     <div className="feature-page">
@@ -70,7 +132,7 @@ export function RecordsPage() {
         </Link>
       </header>
 
-      <div className="segmented-tabs" role="tablist" aria-label="记录类型">
+      <div className="segmented-tabs" role="group" aria-label="记录类型筛选">
         {(
           [
             ['events', '事件'],
@@ -79,15 +141,43 @@ export function RecordsPage() {
           ] as const
         ).map(([value, label]) => (
           <button
-            aria-selected={tab === value}
+            aria-pressed={tab === value}
+            data-active={tab === value || undefined}
             key={value}
-            role="tab"
             type="button"
             onClick={() => setTab(value)}
           >
             {label}
           </button>
         ))}
+      </div>
+
+      <div className="records-filter-row">
+        <label className="filter-search">
+          <Search aria-hidden="true" size={17} />
+          <span className="sr-only">搜索当前记录</span>
+          <Input
+            type="search"
+            value={query}
+            placeholder="搜索标题、描述、小鼠或备注"
+            onChange={(event) => setQuery(event.currentTarget.value)}
+          />
+        </label>
+        {mouseFilter ? (
+          <Button
+            size="small"
+            variant="tertiary"
+            leadingIcon={<X aria-hidden="true" size={15} />}
+            onClick={() => {
+              window.history.pushState(null, '', '/records')
+              window.dispatchEvent(
+                new PopStateEvent('popstate', { state: null })
+              )
+            }}
+          >
+            清除小鼠范围
+          </Button>
+        ) : null}
       </div>
 
       {data === undefined ? (
@@ -114,7 +204,7 @@ export function RecordsPage() {
         />
       ) : tab === 'events' ? (
         <EventList
-          events={data.events}
+          events={filteredEvents}
           mouseLabel={(id) => {
             const mouse = data.mouseById.get(id)
             return mouse ? mouseDisplayLabel(mouse) : `缺失记录 ${id}`
@@ -122,7 +212,7 @@ export function RecordsPage() {
         />
       ) : tab === 'weights' ? (
         <WeightList
-          weights={data.weights}
+          weights={filteredWeights}
           mouseLabel={(id) => {
             const mouse = data.mouseById.get(id)
             return mouse ? mouseDisplayLabel(mouse) : `缺失记录 ${id}`
@@ -130,7 +220,7 @@ export function RecordsPage() {
         />
       ) : (
         <ol className="timeline-list">
-          {data.activities.map((activity) => (
+          {filteredActivities.map((activity) => (
             <li key={activity.id}>
               <span className="timeline-list__rail" aria-hidden="true" />
               <div>

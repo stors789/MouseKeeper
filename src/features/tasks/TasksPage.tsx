@@ -14,10 +14,16 @@ import { Link } from 'wouter'
 import { Alert } from '../../components/ui/Alert'
 import { Button, buttonClassName } from '../../components/ui/Button'
 import { EmptyState } from '../../components/ui/EmptyState'
+import { Select } from '../../components/ui/Select'
 import { Skeleton, SkeletonGroup } from '../../components/ui/Skeleton'
 import { StatusChip } from '../../components/ui/StatusChip'
 import { db } from '../../db'
-import type { Task, TaskStatus } from '../../domain'
+import {
+  mouseDisplayLabel,
+  todayLocalDate,
+  type Task,
+  type TaskStatus
+} from '../../domain'
 import { appService } from '../../app/runtime'
 import { useToast } from '../../hooks/useToast'
 import { readableError } from '../../lib/errors'
@@ -58,12 +64,77 @@ export function TasksPage() {
     []
   )
   const [status, setStatus] = useState<TaskStatus | 'all'>('pending')
+  const [dueScope, setDueScope] = useState<
+    'all' | 'today' | 'upcoming' | 'overdue'
+  >('all')
+  const [relatedKey, setRelatedKey] = useState('all')
   const [busy, setBusy] = useState<string>()
   const [error, setError] = useState<string>()
+  const relations = useLiveQuery(async () => {
+    const [mice, cages, experiments] = await Promise.all([
+      db.mice.filter((item) => item.deletedFlag === 0).toArray(),
+      db.cages.filter((item) => item.deletedFlag === 0).toArray(),
+      db.experiments.filter((item) => item.deletedFlag === 0).toArray()
+    ])
+    return [
+      ...mice.map((mouse) => ({
+        value: `mouse:${mouse.id}`,
+        label: `小鼠 · ${mouseDisplayLabel(mouse)}`
+      })),
+      ...cages.map((cage) => ({
+        value: `cage:${cage.id}`,
+        label: `笼位 · ${cage.cageNumber}`
+      })),
+      ...experiments.map((experiment) => ({
+        value: `experiment:${experiment.id}`,
+        label: `实验 · ${experiment.name}`
+      }))
+    ].toSorted((left, right) =>
+      left.label.localeCompare(right.label, 'zh-CN', { numeric: true })
+    )
+  }, [])
   const visible = useMemo(
-    () =>
-      tasks?.filter((task) => status === 'all' || task.status === status) ?? [],
-    [status, tasks]
+    () => {
+      const today = todayLocalDate()
+      const upcomingDate = new Date(`${today}T12:00:00`)
+      upcomingDate.setDate(upcomingDate.getDate() + 7)
+      const upcomingBoundary = [
+        upcomingDate.getFullYear(),
+        String(upcomingDate.getMonth() + 1).padStart(2, '0'),
+        String(upcomingDate.getDate()).padStart(2, '0')
+      ].join('-')
+      return (
+        tasks?.filter((task) => {
+          if (status !== 'all' && task.status !== status) return false
+          if (dueScope === 'today' && task.dueDate !== today) return false
+          if (
+            dueScope === 'upcoming' &&
+            (task.status !== 'pending' ||
+              task.dueDate < today ||
+              task.dueDate > upcomingBoundary)
+          ) {
+            return false
+          }
+          if (dueScope === 'overdue' && taskTone(task) !== 'critical') {
+            return false
+          }
+          if (relatedKey !== 'all') {
+            const separator = relatedKey.indexOf(':')
+            const type = relatedKey.slice(0, separator)
+            const id = relatedKey.slice(separator + 1)
+            if (
+              (type === 'mouse' && task.mouseId !== id) ||
+              (type === 'cage' && task.cageId !== id) ||
+              (type === 'experiment' && task.experimentId !== id)
+            ) {
+              return false
+            }
+          }
+          return true
+        }) ?? []
+      )
+    },
+    [dueScope, relatedKey, status, tasks]
   )
 
   const setTaskStatus = async (task: Task, nextStatus: TaskStatus) => {
@@ -136,7 +207,7 @@ export function TasksPage() {
         </Alert>
       ) : null}
 
-      <div className="segmented-tabs" role="tablist" aria-label="任务状态">
+      <div className="segmented-tabs" role="group" aria-label="任务状态筛选">
         {(
           [
             ['pending', '待处理'],
@@ -146,15 +217,52 @@ export function TasksPage() {
           ] as const
         ).map(([value, label]) => (
           <button
-            aria-selected={status === value}
+            aria-pressed={status === value}
+            data-active={status === value || undefined}
             key={value}
-            role="tab"
             type="button"
             onClick={() => setStatus(value)}
           >
             {label}
           </button>
         ))}
+      </div>
+
+      <div className="filter-row task-filter-row">
+        <Select
+          ariaLabel="截止时间筛选"
+          value={dueScope}
+          options={[
+            { value: 'all', label: '全部日期' },
+            { value: 'today', label: '今日任务' },
+            { value: 'upcoming', label: '未来 7 天' },
+            { value: 'overdue', label: '已逾期' }
+          ]}
+          onValueChange={(value) =>
+            setDueScope(value as typeof dueScope)
+          }
+        />
+        <Select
+          ariaLabel="关联对象筛选"
+          value={relatedKey}
+          options={[
+            { value: 'all', label: '全部关联对象' },
+            ...(relations ?? [])
+          ]}
+          onValueChange={setRelatedKey}
+        />
+        {dueScope !== 'all' || relatedKey !== 'all' ? (
+          <Button
+            size="small"
+            variant="tertiary"
+            onClick={() => {
+              setDueScope('all')
+              setRelatedKey('all')
+            }}
+          >
+            清除日期与关联筛选
+          </Button>
+        ) : null}
       </div>
 
       {tasks === undefined ? (

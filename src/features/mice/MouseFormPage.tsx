@@ -526,6 +526,7 @@ export function MouseFormPage({
                   <Field id="mouse-cage" label="初始笼位">
                     <Select
                       ref={field.ref}
+                      clearLabel="暂不分配"
                       name={field.name}
                       onBlur={field.onBlur}
                       placeholder="暂不分配"
@@ -539,7 +540,7 @@ export function MouseFormPage({
                           .filter(Boolean)
                           .join(' · ')
                       }))}
-                      value={field.value || undefined}
+                      value={field.value}
                       onValueChange={field.onChange}
                     />
                   </Field>
@@ -553,6 +554,7 @@ export function MouseFormPage({
                 <Field id="mouse-sire" label="父本">
                   <Select
                     ref={field.ref}
+                    clearLabel="未关联"
                     name={field.name}
                     onBlur={field.onBlur}
                     placeholder="未关联"
@@ -560,7 +562,7 @@ export function MouseFormPage({
                       value: mouse.id,
                       label: `${mouseDisplayLabel(mouse)} · ${MOUSE_SEX_LABELS[mouse.sex]} · ${MOUSE_STATUS_LABELS[mouse.status]}`
                     }))}
-                    value={field.value || undefined}
+                    value={field.value}
                     onValueChange={field.onChange}
                   />
                 </Field>
@@ -577,6 +579,7 @@ export function MouseFormPage({
                 >
                   <Select
                     ref={field.ref}
+                    clearLabel="未关联"
                     name={field.name}
                     onBlur={field.onBlur}
                     placeholder="未关联"
@@ -584,7 +587,7 @@ export function MouseFormPage({
                       value: mouse.id,
                       label: `${mouseDisplayLabel(mouse)} · ${MOUSE_SEX_LABELS[mouse.sex]} · ${MOUSE_STATUS_LABELS[mouse.status]}`
                     }))}
-                    value={field.value || undefined}
+                    value={field.value}
                     onValueChange={field.onChange}
                   />
                 </Field>

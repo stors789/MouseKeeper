@@ -272,6 +272,7 @@ export function TaskFormPage({ taskId }: { taskId?: string }) {
                 <Field id="task-mouse" label="小鼠">
                   <Select
                     ref={field.ref}
+                    clearLabel="未关联"
                     name={field.name}
                     onBlur={field.onBlur}
                     placeholder="未关联"
@@ -279,7 +280,7 @@ export function TaskFormPage({ taskId }: { taskId?: string }) {
                       value: mouse.id,
                       label: mouseDisplayLabel(mouse)
                     }))}
-                    value={field.value || undefined}
+                    value={field.value}
                     onValueChange={field.onChange}
                   />
                 </Field>
@@ -292,6 +293,7 @@ export function TaskFormPage({ taskId }: { taskId?: string }) {
                 <Field id="task-cage" label="笼位">
                   <Select
                     ref={field.ref}
+                    clearLabel="未关联"
                     name={field.name}
                     onBlur={field.onBlur}
                     placeholder="未关联"
@@ -299,7 +301,7 @@ export function TaskFormPage({ taskId }: { taskId?: string }) {
                       value: cage.id,
                       label: cage.cageNumber
                     }))}
-                    value={field.value || undefined}
+                    value={field.value}
                     onValueChange={field.onChange}
                   />
                 </Field>
@@ -312,6 +314,7 @@ export function TaskFormPage({ taskId }: { taskId?: string }) {
                 <Field id="task-experiment" label="实验">
                   <Select
                     ref={field.ref}
+                    clearLabel="未关联"
                     name={field.name}
                     onBlur={field.onBlur}
                     placeholder="未关联"
@@ -319,7 +322,7 @@ export function TaskFormPage({ taskId }: { taskId?: string }) {
                       value: experiment.id,
                       label: experiment.name
                     }))}
-                    value={field.value || undefined}
+                    value={field.value}
                     onValueChange={field.onChange}
                   />
                 </Field>

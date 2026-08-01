@@ -22,6 +22,7 @@ import {
   type MouseStatus
 } from '../../domain'
 import { useToast } from '../../hooks/useToast'
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges'
 import { readableError } from '../../lib/errors'
 import {
   MOUSE_SEX_LABELS,
@@ -61,6 +62,8 @@ export function MouseBulkCreatePage() {
   ])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
+  const [isDirty, setIsDirty] = useState(false)
+  useUnsavedChanges(isDirty && !busy)
 
   const updateRow = (
     key: string,
@@ -137,6 +140,7 @@ export function MouseBulkCreatePage() {
         description: `${result.value.mice.length} 只小鼠已在一个事务中建档`,
         tone: 'positive'
       })
+      setIsDirty(false)
       navigate('/mice')
     } catch (actionError) {
       setError(readableError(actionError))
@@ -168,7 +172,11 @@ export function MouseBulkCreatePage() {
         </Alert>
       ) : null}
 
-      <form className="entity-form" onSubmit={(event) => void submit(event)}>
+      <form
+        className="entity-form"
+        onChange={() => setIsDirty(true)}
+        onSubmit={(event) => void submit(event)}
+      >
         <section className="form-section" aria-labelledby="bulk-shared-title">
           <div className="form-section__heading">
             <span className="assay-rail-mark" aria-hidden="true" />
@@ -235,40 +243,52 @@ export function MouseBulkCreatePage() {
             {rows.map((row, index) => (
               <div className="bulk-mouse-row" role="row" key={row.key}>
                 <span role="cell">{index + 1}</span>
-                <Input
-                  aria-label={`第 ${index + 1} 行耳标号`}
-                  value={row.earTag}
-                  onChange={(event) =>
-                    updateRow(row.key, { earTag: event.target.value })
-                  }
-                />
-                <Input
-                  aria-label={`第 ${index + 1} 行实验编号`}
-                  value={row.experimentNumber}
-                  onChange={(event) =>
-                    updateRow(row.key, {
-                      experimentNumber: event.target.value
-                    })
-                  }
-                />
-                <Input
-                  aria-label={`第 ${index + 1} 行名称`}
-                  value={row.name}
-                  onChange={(event) =>
-                    updateRow(row.key, { name: event.target.value })
-                  }
-                />
-                <Select
-                  ariaLabel={`第 ${index + 1} 行性别`}
-                  value={row.sex}
-                  options={MOUSE_SEXES.map((sex) => ({
-                    value: sex,
-                    label: MOUSE_SEX_LABELS[sex]
-                  }))}
-                  onValueChange={(sex) =>
-                    updateRow(row.key, { sex: sex as MouseSex })
-                  }
-                />
+                <label className="responsive-table-field">
+                  <span>耳标号</span>
+                  <Input
+                    aria-label={`第 ${index + 1} 行耳标号`}
+                    value={row.earTag}
+                    onChange={(event) =>
+                      updateRow(row.key, { earTag: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="responsive-table-field">
+                  <span>实验编号</span>
+                  <Input
+                    aria-label={`第 ${index + 1} 行实验编号`}
+                    value={row.experimentNumber}
+                    onChange={(event) =>
+                      updateRow(row.key, {
+                        experimentNumber: event.target.value
+                      })
+                    }
+                  />
+                </label>
+                <label className="responsive-table-field">
+                  <span>名称</span>
+                  <Input
+                    aria-label={`第 ${index + 1} 行名称`}
+                    value={row.name}
+                    onChange={(event) =>
+                      updateRow(row.key, { name: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="responsive-table-field">
+                  <span>性别</span>
+                  <Select
+                    ariaLabel={`第 ${index + 1} 行性别`}
+                    value={row.sex}
+                    options={MOUSE_SEXES.map((sex) => ({
+                      value: sex,
+                      label: MOUSE_SEX_LABELS[sex]
+                    }))}
+                    onValueChange={(sex) =>
+                      updateRow(row.key, { sex: sex as MouseSex })
+                    }
+                  />
+                </label>
                 <Button
                   aria-label={`删除第 ${index + 1} 行`}
                   type="button"

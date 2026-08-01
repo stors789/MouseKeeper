@@ -6,6 +6,8 @@ import {
   type FocusEventHandler
 } from 'react'
 
+const EMPTY_VALUE = '__mousekeeper_empty_value__'
+
 export interface SelectOption {
   value: string
   label: string
@@ -20,6 +22,7 @@ export interface SelectProps {
   onValueChange?: (value: string) => void
   options: readonly SelectOption[]
   placeholder?: string
+  clearLabel?: string
   disabled?: boolean
   invalid?: boolean
   ariaLabel?: string
@@ -35,6 +38,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(
     {
       ariaLabel,
       className,
+      clearLabel,
       defaultValue,
       disabled,
       id,
@@ -53,11 +57,15 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(
   ) {
     return (
       <SelectPrimitive.Root
-        defaultValue={defaultValue}
+        defaultValue={
+          clearLabel && defaultValue === '' ? EMPTY_VALUE : defaultValue
+        }
         disabled={disabled}
         name={name}
-        onValueChange={onValueChange}
-        value={value}
+        onValueChange={nextValue =>
+          onValueChange?.(nextValue === EMPTY_VALUE ? '' : nextValue)
+        }
+        value={clearLabel && value === '' ? EMPTY_VALUE : value}
       >
         <SelectPrimitive.Trigger
           ref={ref}
@@ -84,6 +92,19 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(
               <ChevronUp aria-hidden="true" size={16} />
             </SelectPrimitive.ScrollUpButton>
             <SelectPrimitive.Viewport className="ui-select__viewport">
+              {clearLabel ? (
+                <SelectPrimitive.Item
+                  className="ui-select__item"
+                  value={EMPTY_VALUE}
+                >
+                  <SelectPrimitive.ItemText>
+                    {clearLabel}
+                  </SelectPrimitive.ItemText>
+                  <SelectPrimitive.ItemIndicator className="ui-select__indicator">
+                    <Check aria-hidden="true" size={15} />
+                  </SelectPrimitive.ItemIndicator>
+                </SelectPrimitive.Item>
+              ) : null}
               {options.map((option) => (
                 <SelectPrimitive.Item
                   key={option.value}

@@ -183,7 +183,8 @@ export function CagesPage() {
                   aria-label={`笼位 ${cage.cageNumber} 容量`}
                   aria-valuemin={0}
                   aria-valuemax={cage.maxCapacity}
-                  aria-valuenow={mice.length}
+                  aria-valuenow={Math.min(mice.length, cage.maxCapacity)}
+                  aria-valuetext={`${mice.length} / ${cage.maxCapacity}${mice.length > cage.maxCapacity ? '，已超容' : ''}`}
                 >
                   <span style={{ width: `${ratio}%` }} />
                 </div>

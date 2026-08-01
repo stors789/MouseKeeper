@@ -35,6 +35,14 @@ export function AppShell({ children }: AppShellProps) {
   const pageTitle = getPageTitle(location)
 
   useEffect(() => {
+    document.title = `${pageTitle} · ${APP_CONFIG.name}`
+    const frame = requestAnimationFrame(() => {
+      document.getElementById('main-content')?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [location, pageTitle])
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target)) {
         return
@@ -83,6 +91,7 @@ export function AppShell({ children }: AppShellProps) {
         </div>
         <div className="app-topbar__actions">
           <button
+            aria-label="搜索记录或工作区"
             aria-keyshortcuts="/ Meta+K Control+K"
             className="global-search-trigger"
             type="button"

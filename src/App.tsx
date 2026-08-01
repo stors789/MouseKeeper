@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react'
 import { Route, Switch } from 'wouter'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { Skeleton, SkeletonGroup } from './components/ui/Skeleton'
 import { ToastProvider } from './components/ui/Toast'
 import { ThemeProvider } from './hooks/ThemeProvider'
@@ -198,9 +199,11 @@ export function App() {
     <ThemeProvider>
       <ToastProvider>
         <AppShell>
-          <Suspense fallback={<RouteLoading />}>
-            <RoutedContent />
-          </Suspense>
+          <ErrorBoundary>
+            <Suspense fallback={<RouteLoading />}>
+              <RoutedContent />
+            </Suspense>
+          </ErrorBoundary>
         </AppShell>
       </ToastProvider>
     </ThemeProvider>
