@@ -11,6 +11,7 @@ import {
   X
 } from 'lucide-react'
 import { Link } from 'wouter'
+import { APPLICATION_EVENT_NAMES, readApplicationViewCommand, viewCommandFromEvent } from '../../application'
 import { Alert } from '../../components/ui/Alert'
 import { Button, buttonClassName } from '../../components/ui/Button'
 import { EmptyState } from '../../components/ui/EmptyState'
@@ -51,6 +52,7 @@ function taskTone(task: Task) {
 
 export function TasksPage() {
   const { showToast } = useToast()
+  const initialView = useMemo(() => readApplicationViewCommand('tasks'), [])
   const focusTaskId =
     new URLSearchParams(window.location.search).get('focus') ?? ''
   const tasks = useLiveQuery(
@@ -65,11 +67,11 @@ export function TasksPage() {
         ),
     []
   )
-  const [status, setStatus] = useState<TaskStatus | 'all'>('pending')
+  const [status, setStatus] = useState<TaskStatus | 'all'>(() => initialView.status === 'all' || initialView.status === 'pending' || initialView.status === 'completed' || initialView.status === 'cancelled' ? initialView.status : 'pending')
   const [dueScope, setDueScope] = useState<
     'all' | 'today' | 'upcoming' | 'overdue'
-  >('all')
-  const [relatedKey, setRelatedKey] = useState('all')
+  >(() => initialView.dueScope === 'today' || initialView.dueScope === 'upcoming' || initialView.dueScope === 'overdue' ? initialView.dueScope : 'all')
+  const [relatedKey, setRelatedKey] = useState(() => typeof initialView.relatedKey === 'string' ? initialView.relatedKey : 'all')
   const [busy, setBusy] = useState<string>()
   const [error, setError] = useState<string>()
   const relations = useLiveQuery(async () => {
@@ -94,6 +96,17 @@ export function TasksPage() {
     ].toSorted((left, right) =>
       left.label.localeCompare(right.label, 'zh-CN', { numeric: true })
     )
+  }, [])
+  useEffect(() => {
+    const handleView = (event: Event) => {
+      const state = viewCommandFromEvent(event, 'tasks')
+      if (!state) return
+      if (state.status === 'all' || state.status === 'pending' || state.status === 'completed' || state.status === 'cancelled') setStatus(state.status)
+      if (state.dueScope === 'all' || state.dueScope === 'today' || state.dueScope === 'upcoming' || state.dueScope === 'overdue') setDueScope(state.dueScope)
+      if (typeof state.relatedKey === 'string') setRelatedKey(state.relatedKey)
+    }
+    globalThis.addEventListener(APPLICATION_EVENT_NAMES.view, handleView)
+    return () => globalThis.removeEventListener(APPLICATION_EVENT_NAMES.view, handleView)
   }, [])
   const visible = useMemo(
     () => {

@@ -103,5 +103,5 @@ export function createDefaultProviderSettings(now = new Date().toISOString()): P
       updatedAt: now
     })
   ]
-  return { version: 1, profiles, presets, defaultPresetId: 'high-quality', updatedAt: now }
+  return { version: 1, profiles, presets, defaultPresetId: 'high-quality', connectionReports: {}, updatedAt: now }
 }

@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Activity, NotebookPen, Scale, Search, X } from 'lucide-react'
 import { Link } from 'wouter'
+import { APPLICATION_EVENT_NAMES, readApplicationViewCommand, viewCommandFromEvent } from '../../application'
 import { Button, buttonClassName } from '../../components/ui/Button'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { Input } from '../../components/ui/Input'
@@ -19,6 +20,7 @@ import { EVENT_TYPE_LABELS } from '../../lib/labels'
 type RecordsTab = 'events' | 'weights' | 'activity'
 
 export function RecordsPage() {
+  const initialView = useMemo(() => readApplicationViewCommand('records'), [])
   const searchParams = new URLSearchParams(window.location.search)
   const mouseFilter = searchParams.get('mouse') ?? ''
   const data = useLiveQuery(async () => {
@@ -101,8 +103,18 @@ export function RecordsPage() {
       mouseById: new Map(mice.map((mouse) => [mouse.id, mouse]))
     }
   }, [mouseFilter])
-  const [tab, setTab] = useState<RecordsTab>('events')
-  const [query, setQuery] = useState('')
+  const [tab, setTab] = useState<RecordsTab>(() => initialView.tab === 'weights' || initialView.tab === 'activity' ? initialView.tab : 'events')
+  const [query, setQuery] = useState(() => typeof initialView.query === 'string' ? initialView.query : '')
+  useEffect(() => {
+    const handleView = (event: Event) => {
+      const state = viewCommandFromEvent(event, 'records')
+      if (!state) return
+      if (state.tab === 'events' || state.tab === 'weights' || state.tab === 'activity') setTab(state.tab)
+      if (typeof state.query === 'string') setQuery(state.query)
+    }
+    globalThis.addEventListener(APPLICATION_EVENT_NAMES.view, handleView)
+    return () => globalThis.removeEventListener(APPLICATION_EVENT_NAMES.view, handleView)
+  }, [])
   const normalizedQuery = normalizeText(query)
   const filteredEvents = useMemo(
     () =>

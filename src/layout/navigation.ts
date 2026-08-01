@@ -1,5 +1,6 @@
 import {
   Boxes,
+  Bot,
   DatabaseBackup,
   Dna,
   FlaskConical,
@@ -39,6 +40,14 @@ export const DASHBOARD_ITEM: NavigationItem = {
   description: '查看群体读数、需要关注的事项和最近活动',
   icon: LayoutDashboard,
   keywords: ['首页', '仪表盘', 'dashboard', 'overview']
+}
+
+export const AGENT_ITEM: NavigationItem = {
+  href: '/agent',
+  label: 'Agent',
+  description: '用自然语言查询、修改与串联 MouseKeeper 工作流',
+  icon: Bot,
+  keywords: ['agent', '智能助手', '自然语言', 'llm', '自动化']
 }
 
 export const MICE_ITEM: NavigationItem = {
@@ -109,7 +118,7 @@ export const SETTINGS_ITEM: NavigationItem = {
 export const NAVIGATION_GROUPS: readonly NavigationGroup[] = [
   {
     label: '工作台',
-    items: [DASHBOARD_ITEM, MICE_ITEM, CAGES_ITEM]
+    items: [DASHBOARD_ITEM, AGENT_ITEM, MICE_ITEM, CAGES_ITEM]
   },
   {
     label: '研究',
@@ -132,6 +141,7 @@ export const ALL_NAVIGATION_ITEMS = NAVIGATION_GROUPS.flatMap(
 
 export const MOBILE_PRIMARY_ITEMS: readonly NavigationItem[] = [
   DASHBOARD_ITEM,
+  AGENT_ITEM,
   MICE_ITEM,
   CAGES_ITEM,
   TASKS_ITEM
@@ -187,6 +197,7 @@ export const CREATE_ACTIONS: readonly CreateAction[] = [
 const PAGE_TITLES: Readonly<Record<string, string>> = {
   '/': '群体总览',
   '/dashboard': '群体总览',
+  '/agent': 'Agent',
   '/mice': '小鼠',
   '/mice/new': '新建小鼠',
   '/mice/bulk-create': '批量创建小鼠',

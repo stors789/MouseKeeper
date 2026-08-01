@@ -15,10 +15,12 @@ import {
   Upload
 } from 'lucide-react'
 import {
+  useEffect,
   useMemo,
   useState,
   type ChangeEvent
 } from 'react'
+import { APPLICATION_EVENT_NAMES, readApplicationViewCommand, viewCommandFromEvent } from '../../application'
 import { appDatabase, appService } from '../../app/runtime'
 import {
   BACKUP_TABLE_NAMES,
@@ -120,7 +122,8 @@ function timestampFilename(prefix: string, extension: string): string {
 
 export function DataPage() {
   const { showToast } = useToast()
-  const [tab, setTab] = useState<DataTab>('backup')
+  const initialView = useMemo(() => readApplicationViewCommand('data'), [])
+  const [tab, setTab] = useState<DataTab>(() => initialView.tab === 'import' || initialView.tab === 'export' || initialView.tab === 'recycle' || initialView.tab === 'sample' ? initialView.tab : 'backup')
   const [busy, setBusy] = useState<string>()
   const [error, setError] = useState<string>()
   const [restoreFile, setRestoreFile] = useState<File>()
@@ -133,6 +136,15 @@ export function DataPage() {
     useState<MouseImportCommitReport>()
   const [purgePreview, setPurgePreview] = useState<PurgePreview>()
   const [purgeConfirmation, setPurgeConfirmation] = useState('')
+
+  useEffect(() => {
+    const handleView = (event: Event) => {
+      const state = viewCommandFromEvent(event, 'data')
+      if (state?.tab === 'backup' || state?.tab === 'import' || state?.tab === 'export' || state?.tab === 'recycle' || state?.tab === 'sample') setTab(state.tab)
+    }
+    globalThis.addEventListener(APPLICATION_EVENT_NAMES.view, handleView)
+    return () => globalThis.removeEventListener(APPLICATION_EVENT_NAMES.view, handleView)
+  }, [])
 
   const inventory = useLiveQuery(async () => {
     const [

@@ -1,3 +1,4 @@
 export * from './capabilities'
 export * from './files'
 export * from './data'
+export * from './view-state'

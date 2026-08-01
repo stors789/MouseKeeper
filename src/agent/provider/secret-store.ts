@@ -13,8 +13,8 @@ export class SecretStore {
   readonly #policies = new Map<string, SecretStoragePolicy>()
 
   constructor(
-    private readonly session: Storage | undefined = typeof sessionStorage === 'undefined' ? undefined : sessionStorage,
-    private readonly local: Storage | undefined = typeof localStorage === 'undefined' ? undefined : localStorage
+    private readonly session: Storage | undefined = globalThis.window?.sessionStorage,
+    private readonly local: Storage | undefined = globalThis.window?.localStorage
   ) {}
 
   set(ref: string, secret: string, policy: SecretStoragePolicy): SecretMetadata {
