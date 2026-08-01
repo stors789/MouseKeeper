@@ -2,7 +2,9 @@ import { Search } from 'lucide-react'
 import {
   lazy,
   Suspense,
+  useCallback,
   useEffect,
+  useRef,
   useState,
   type ReactNode
 } from 'react'
@@ -32,7 +34,19 @@ export function AppShell({ children }: AppShellProps) {
   const [location] = useLocation()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const searchTriggerRef = useRef<HTMLButtonElement>(null)
   const pageTitle = getPageTitle(location)
+
+  const setGlobalSearchOpen = useCallback((open: boolean) => {
+    setSearchOpen(open)
+    if (!open) {
+      requestAnimationFrame(() => {
+        if (document.activeElement === document.body) {
+          searchTriggerRef.current?.focus()
+        }
+      })
+    }
+  }, [])
 
   useEffect(() => {
     document.title = `${pageTitle} · ${APP_CONFIG.name}`
@@ -59,13 +73,13 @@ export function AppShell({ children }: AppShellProps) {
 
       if (commandSearch || slashSearch) {
         event.preventDefault()
-        setSearchOpen(true)
+        setGlobalSearchOpen(true)
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  }, [setGlobalSearchOpen])
 
   return (
     <div
@@ -94,8 +108,9 @@ export function AppShell({ children }: AppShellProps) {
             aria-label="搜索记录或工作区"
             aria-keyshortcuts="/ Meta+K Control+K"
             className="global-search-trigger"
+            ref={searchTriggerRef}
             type="button"
-            onClick={() => setSearchOpen(true)}
+            onClick={() => setGlobalSearchOpen(true)}
           >
             <Search aria-hidden="true" size={17} />
             <span>搜索记录或工作区</span>
@@ -117,7 +132,7 @@ export function AppShell({ children }: AppShellProps) {
         <Suspense fallback={null}>
           <GlobalSearchDialog
             open={searchOpen}
-            onOpenChange={setSearchOpen}
+            onOpenChange={setGlobalSearchOpen}
           />
         </Suspense>
       ) : null}

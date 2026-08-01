@@ -111,6 +111,20 @@ test('warns before abandoning an unsaved mouse form', async ({
   await expect(page).toHaveURL('/cages')
 })
 
+test('global search restores focus to its trigger when dismissed', async ({
+  page
+}) => {
+  await page.goto('/')
+  const trigger = page.getByRole('button', {
+    name: '搜索记录或工作区'
+  })
+  await trigger.focus()
+  await trigger.press('Enter')
+  await expect(page.getByLabel('搜索 MouseKeeper')).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(trigger).toBeFocused()
+})
+
 test('mobile operational subroutes stay usable without page overflow', async ({
   isMobile,
   page
