@@ -157,6 +157,24 @@ describe('AgentOrchestrator', () => {
     expect(result.commandRun.traces.map((trace) => trace.status)).toEqual(['failed', 'succeeded'])
   })
 
+  it('does not report success when the final tool call failed', async () => {
+    const model = new ScriptedModel((_input, index) => index === 0
+      ? {
+          text: '',
+          toolCalls: [call('bad-final', 'execute_capability', { capabilityId: 'cage.missing', input: {} })],
+          effective: { requested: settings.presets[0]!, omitted: [] }
+        }
+      : {
+          text: '操作已经完成。',
+          toolCalls: [],
+          effective: { requested: settings.presets[0]!, omitted: [] }
+        })
+    const result = await orchestrator(model).run(runInput('执行一个不存在的能力'))
+    expect(result.status).toBe('failed')
+    expect(result.error).toContain('最后一步 cage.missing 未完成')
+    expect(result.commandRun.traces.at(-1)?.status).toBe('failed')
+  })
+
   it('includes explicit route, filters, date and recent entities in context', async () => {
     const model = new ScriptedModel(() => ({
       text: '已查看上下文。',

@@ -203,6 +203,10 @@ export class AgentOrchestrator {
       if (rounds > input.preset.maxToolRounds) {
         throw new Error(`已达到最大工具轮次 ${input.preset.maxToolRounds}，停止继续执行`)
       }
+      const lastTrace = traces.at(-1)
+      if (lastTrace?.status === 'failed') {
+        throw new Error(`最后一步 ${lastTrace.capabilityId} 未完成：${lastTrace.error ?? '工具执行失败'}`)
+      }
       const affected = uniqueAffected(results)
       const capabilityIds = results.map((result) => result.capabilityId)
       const forceFullBackup = capabilityIds.some((id) => {
