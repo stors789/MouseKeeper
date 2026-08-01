@@ -96,7 +96,10 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith(
     caches
-      .match(event.request)
+      // Vite preview adds `Vary: Origin` to static assets. The install fetch
+      // and a later module/style request carry different Origin headers, so
+      // matching the already allow-listed static request must ignore Vary.
+      .match(event.request, { ignoreVary: true })
       .then((cached) => {
         const network = fetch(event.request)
           .then((response) => {
