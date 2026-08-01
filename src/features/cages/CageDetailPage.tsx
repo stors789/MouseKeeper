@@ -54,7 +54,7 @@ export function CageDetailPage({ cageId }: { cageId: string }) {
   const data = useLiveQuery(async () => {
     const cage = await appDatabase.cages.get(cageId)
     if (!cage) return { cage: undefined }
-    const [activeAssignments, history, mice] = await Promise.all([
+    const [activeAssignments, history, mice, settings] = await Promise.all([
       appDatabase.cageAssignments
         .filter(
           (assignment) =>
@@ -71,7 +71,8 @@ export function CageDetailPage({ cageId }: { cageId: string }) {
         .toArray(),
       appDatabase.mice
         .filter((mouse) => mouse.deletedFlag === 0)
-        .toArray()
+        .toArray(),
+      appDatabase.appSettings.get('app-settings')
     ])
     const mouseById = new Map(mice.map((mouse) => [mouse.id, mouse]))
     const occupants = activeAssignments.flatMap((assignment) => {
@@ -89,7 +90,8 @@ export function CageDetailPage({ cageId }: { cageId: string }) {
       history: history.toSorted((left, right) =>
         right.startedAt.localeCompare(left.startedAt)
       ),
-      mouseById
+      mouseById,
+      capacityWarningPercent: settings?.capacityWarningPercent ?? 0.8
     }
   }, [cageId])
 
@@ -208,7 +210,7 @@ export function CageDetailPage({ cageId }: { cageId: string }) {
   const capacityTone =
     occupancyRatio > 1
       ? 'critical'
-      : occupancyRatio >= 0.8
+      : occupancyRatio >= data.capacityWarningPercent
         ? 'warning'
         : 'positive'
   const birthDates = occupants
@@ -270,7 +272,7 @@ export function CageDetailPage({ cageId }: { cageId: string }) {
           {error}
         </Alert>
       ) : null}
-      {occupancyRatio >= 0.8 ? (
+      {occupancyRatio >= data.capacityWarningPercent ? (
         <Alert
           title={occupancyRatio > 1 ? '笼位已超出容量' : '笼位接近容量上限'}
           tone={occupancyRatio > 1 ? 'critical' : 'warning'}

@@ -59,4 +59,40 @@ describe('commitMouseImport', () => {
     expect(mouse?.tagIds).toHaveLength(1)
     expect(await database.tags.where('importBatchId').equals('batch-1').count()).toBe(1)
   })
+
+  it('reuses batch lookup maps for tags and earlier imported parents', async () => {
+    const csv = [
+      '耳标号,品系,性别,出生日期,父本耳标,标签',
+      'BATCH-SIRE,C57BL/6J,雄性,2025-01-01,,共享标签',
+      'BATCH-PUP,C57BL/6J,雌性,2026-01-01,BATCH-SIRE,共享标签'
+    ].join('\n')
+    const parsed = parseCsvPreview(csv)
+    const preview = validateMouseImport(
+      parsed,
+      suggestMouseFieldMapping(parsed.headers)
+    )
+
+    const report = await commitMouseImport(
+      database,
+      service,
+      preview,
+      'batch-relations'
+    )
+
+    expect(report).toMatchObject({
+      importedCount: 2,
+      skippedCount: 0,
+      failedCount: 0
+    })
+    const sire = await database.mice
+      .where('activeEarTagKey')
+      .equals('ear:batch-sire')
+      .first()
+    const pup = await database.mice
+      .where('activeEarTagKey')
+      .equals('ear:batch-pup')
+      .first()
+    expect(pup?.sireId).toBe(sire?.id)
+    expect(await database.tags.count()).toBe(1)
+  })
 })

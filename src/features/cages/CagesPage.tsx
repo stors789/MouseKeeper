@@ -22,11 +22,13 @@ interface CageListRecord {
   mice: Mouse[]
 }
 
-function capacityTone(record: CageListRecord) {
+const PAGE_SIZE = 48
+
+function capacityTone(record: CageListRecord, warningThreshold: number) {
   if (record.cage.maxCapacity <= 0) return 'neutral' as const
   const ratio = record.mice.length / record.cage.maxCapacity
   if (ratio > 1) return 'critical' as const
-  if (ratio >= 0.8) return 'warning' as const
+  if (ratio >= warningThreshold) return 'warning' as const
   return 'positive' as const
 }
 
@@ -60,6 +62,14 @@ export function CagesPage() {
       )
   }, [])
   const [query, setQuery] = useState('')
+  const [page, setPage] = useState(0)
+  const capacityWarningPercent =
+    useLiveQuery(
+      async () =>
+        (await db.appSettings.get('app-settings'))?.capacityWarningPercent ??
+        0.8,
+      []
+    ) ?? 0.8
   const deferredQuery = useDeferredValue(normalizeText(query))
 
   const filtered = useMemo(() => {
@@ -75,6 +85,12 @@ export function CagesPage() {
       ].some((value) => value && normalizeText(value).includes(deferredQuery))
     )
   }, [deferredQuery, records])
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const safePage = Math.min(page, pageCount - 1)
+  const visible = filtered.slice(
+    safePage * PAGE_SIZE,
+    (safePage + 1) * PAGE_SIZE
+  )
 
   return (
     <div className="feature-page">
@@ -104,7 +120,10 @@ export function CagesPage() {
           <input
             value={query}
             placeholder="搜索编号、房间、架位、用途或品系"
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value)
+              setPage(0)
+            }}
           />
         </label>
       </section>
@@ -131,7 +150,10 @@ export function CagesPage() {
               <button
                 className={buttonClassName({ variant: 'secondary' })}
                 type="button"
-                onClick={() => setQuery('')}
+                onClick={() => {
+                  setQuery('')
+                  setPage(0)
+                }}
               >
                 清除搜索
               </button>
@@ -146,69 +168,101 @@ export function CagesPage() {
           }
         />
       ) : (
-        <ul className="record-grid" aria-label="笼位列表">
-          {filtered.map((record) => {
-            const { cage, mice } = record
-            const males = mice.filter((mouse) => mouse.sex === 'male').length
-            const females = mice.filter((mouse) => mouse.sex === 'female').length
-            const ratio =
-              cage.maxCapacity > 0
-                ? Math.min((mice.length / cage.maxCapacity) * 100, 100)
-                : 0
-            const tone = capacityTone(record)
+        <>
+          <ul className="record-grid" aria-label="笼位列表">
+            {visible.map((record) => {
+              const { cage, mice } = record
+              const males = mice.filter((mouse) => mouse.sex === 'male').length
+              const females = mice.filter(
+                (mouse) => mouse.sex === 'female'
+              ).length
+              const ratio =
+                cage.maxCapacity > 0
+                  ? Math.min((mice.length / cage.maxCapacity) * 100, 100)
+                  : 0
+              const tone = capacityTone(record, capacityWarningPercent)
 
-            return (
-              <li className="cage-record" key={cage.id}>
-                <div className="cage-record__title">
-                  <div>
-                    <Link href={`/cages/${encodeURIComponent(cage.id)}`}>
-                      {cage.cageNumber}
-                    </Link>
-                    <p>
-                      {[cage.room, cage.rack, cage.purpose]
-                        .filter(Boolean)
-                        .join(' · ') || '位置与用途未记录'}
-                    </p>
+              return (
+                <li className="cage-record" key={cage.id}>
+                  <div className="cage-record__title">
+                    <div>
+                      <Link href={`/cages/${encodeURIComponent(cage.id)}`}>
+                        {cage.cageNumber}
+                      </Link>
+                      <p>
+                        {[cage.room, cage.rack, cage.purpose]
+                          .filter(Boolean)
+                          .join(' · ') || '位置与用途未记录'}
+                      </p>
+                    </div>
+                    <StatusChip
+                      icon={tone === 'critical' ? TriangleAlert : Gauge}
+                      label={`${mice.length} / ${cage.maxCapacity}`}
+                      tone={tone}
+                    />
                   </div>
-                  <StatusChip
-                    icon={tone === 'critical' ? TriangleAlert : Gauge}
-                    label={`${mice.length} / ${cage.maxCapacity}`}
-                    tone={tone}
-                  />
-                </div>
-                <div
-                  className="capacity-track"
-                  data-tone={tone}
-                  role="meter"
-                  aria-label={`笼位 ${cage.cageNumber} 容量`}
-                  aria-valuemin={0}
-                  aria-valuemax={cage.maxCapacity}
-                  aria-valuenow={Math.min(mice.length, cage.maxCapacity)}
-                  aria-valuetext={`${mice.length} / ${cage.maxCapacity}${mice.length > cage.maxCapacity ? '，已超容' : ''}`}
-                >
-                  <span style={{ width: `${ratio}%` }} />
-                </div>
-                <dl className="cage-record__facts">
-                  <div>
-                    <dt>状态</dt>
-                    <dd>{CAGE_STATUS_LABELS[cage.status]}</dd>
+                  <div
+                    className="capacity-track"
+                    data-tone={tone}
+                    role="meter"
+                    aria-label={`笼位 ${cage.cageNumber} 容量`}
+                    aria-valuemin={0}
+                    aria-valuemax={cage.maxCapacity}
+                    aria-valuenow={Math.min(mice.length, cage.maxCapacity)}
+                    aria-valuetext={`${mice.length} / ${cage.maxCapacity}${mice.length > cage.maxCapacity ? '，已超容' : ''}`}
+                  >
+                    <span style={{ width: `${ratio}%` }} />
                   </div>
-                  <div>
-                    <dt>性别组成</dt>
-                    <dd>
-                      {MOUSE_SEX_LABELS.male} {males} · {MOUSE_SEX_LABELS.female}{' '}
-                      {females}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>主要品系</dt>
-                    <dd>{cage.primaryStrain ?? '未指定'}</dd>
-                  </div>
-                </dl>
-              </li>
-            )
-          })}
-        </ul>
+                  <dl className="cage-record__facts">
+                    <div>
+                      <dt>状态</dt>
+                      <dd>{CAGE_STATUS_LABELS[cage.status]}</dd>
+                    </div>
+                    <div>
+                      <dt>性别组成</dt>
+                      <dd>
+                        {MOUSE_SEX_LABELS.male} {males} ·{' '}
+                        {MOUSE_SEX_LABELS.female} {females}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>主要品系</dt>
+                      <dd>{cage.primaryStrain ?? '未指定'}</dd>
+                    </div>
+                  </dl>
+                </li>
+              )
+            })}
+          </ul>
+          <nav aria-label="笼位列表分页" className="pagination">
+            <span>
+              {safePage * PAGE_SIZE + 1}–
+              {Math.min((safePage + 1) * PAGE_SIZE, filtered.length)} /{' '}
+              {filtered.length}
+            </span>
+            <div>
+              <button
+                type="button"
+                disabled={safePage === 0}
+                onClick={() => setPage(current => Math.max(0, current - 1))}
+              >
+                上一页
+              </button>
+              <span>
+                第 {safePage + 1} / {pageCount} 页
+              </span>
+              <button
+                type="button"
+                disabled={safePage >= pageCount - 1}
+                onClick={() =>
+                  setPage(current => Math.min(pageCount - 1, current + 1))
+                }
+              >
+                下一页
+              </button>
+            </div>
+          </nav>
+        </>
       )}
     </div>
   )

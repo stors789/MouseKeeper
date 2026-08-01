@@ -78,7 +78,8 @@ export async function loadDashboardSnapshot(
     breedingPairs,
     tasks,
     recentEvents,
-    recentActivity
+    recentActivity,
+    settings
   ] = await Promise.all([
     database.mice.filter((mouse) => mouse.deletedFlag === 0).toArray(),
     database.cages.filter((cage) => cage.deletedFlag === 0).toArray(),
@@ -113,7 +114,8 @@ export async function loadDashboardSnapshot(
       .reverse()
       .filter((activity) => activity.deletedFlag === 0)
       .limit(12)
-      .toArray()
+      .toArray(),
+    database.appSettings.get('app-settings')
   ])
 
   const statusCounts = emptyStatusCounts()
@@ -188,6 +190,7 @@ export async function loadDashboardSnapshot(
   }
 
   const attention: DashboardSnapshot['attention'] = []
+  const capacityWarningPercent = settings?.capacityWarningPercent ?? 0.8
   for (const task of overdueTasks.slice(0, 5)) {
     attention.push({
       id: `task:${task.id}`,
@@ -203,7 +206,7 @@ export async function loadDashboardSnapshot(
     if (cage.maxCapacity <= 0) continue
     const count = occupancyByCage.get(cage.id) ?? 0
     const ratio = count / cage.maxCapacity
-    if (ratio < 0.8) continue
+    if (ratio < capacityWarningPercent) continue
     attention.push({
       id: `cage:${cage.id}`,
       kind: 'cage-capacity',
