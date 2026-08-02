@@ -1,5 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="MouseKeeper">
-  <rect width="64" height="64" rx="14" fill="#143f3a"/>
-  <path d="M18 20h28v8H18zm0 16h20v8H18z" fill="#e8f0ed"/>
-  <circle cx="47" cy="40" r="7" fill="#6fc3b4"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title">
+  <title id="title">MouseKeeper</title>
+  <rect width="1024" height="1024" fill="#143f3a"/>
+  <circle cx="322" cy="248" r="104" fill="#b9ddc9"/>
+  <circle cx="702" cy="248" r="104" fill="#b9ddc9"/>
+  <rect x="292" y="286" width="500" height="510" rx="124" fill="#b9ddc9"/>
+  <rect x="210" y="370" width="520" height="492" rx="92" fill="#f5f7f5"/>
+  <rect x="296" y="506" width="322" height="54" rx="27" fill="#b9ddc9"/>
+  <rect x="296" y="626" width="222" height="54" rx="27" fill="#b9ddc9"/>
+  <path d="M438 820h92c82 0 102-48 118-106 13-47 39-70 75-70 41 0 65 28 65 77v102" fill="none" stroke="#143f3a" stroke-width="50" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
