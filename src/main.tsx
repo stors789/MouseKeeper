@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import './styles.css'
+import { registerPwaServiceWorker } from './platform/pwa'
 
 const root = document.getElementById('root')
 
@@ -15,8 +16,4 @@ createRoot(root).render(
   </StrictMode>
 )
 
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  window.addEventListener('load', () => {
-    void navigator.serviceWorker.register('/sw.js')
-  })
-}
+registerPwaServiceWorker()

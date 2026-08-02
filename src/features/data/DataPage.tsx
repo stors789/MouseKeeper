@@ -44,6 +44,8 @@ import { useToast } from '../../hooks/useToast'
 import { readableError } from '../../lib/errors'
 import { downloadBlob } from '../../lib/download'
 import { formatInstant } from '../../lib/format'
+import { pickImportFile } from '../../platform/files'
+import { isNativeApp } from '../../platform/runtime'
 import {
   exportCagesCsv,
   exportEventsCsv,
@@ -121,6 +123,7 @@ function timestampFilename(prefix: string, extension: string): string {
 }
 
 export function DataPage() {
+  const nativeApp = isNativeApp()
   const { showToast } = useToast()
   const initialView = useMemo(() => readApplicationViewCommand('data'), [])
   const [tab, setTab] = useState<DataTab>(() => initialView.tab === 'import' || initialView.tab === 'export' || initialView.tab === 'recycle' || initialView.tab === 'sample' ? initialView.tab : 'backup')
@@ -260,7 +263,7 @@ export function DataPage() {
     run('backup-export', async () => {
       await appService.ensureAppSettings()
       const backup = await exportDatabaseBackup(appDatabase)
-      downloadBlob(
+      await downloadBlob(
         backupBlob(backup),
         timestampFilename('mousekeeper-backup', 'json')
       )
@@ -271,8 +274,7 @@ export function DataPage() {
       })
     })
 
-  const chooseRestoreFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
+  const prepareRestoreFile = async (file: File | undefined) => {
     setRestoreFile(file)
     setRestorePreview(undefined)
     setRestoreConfirmation('')
@@ -288,6 +290,18 @@ export function DataPage() {
     }
   }
 
+  const chooseRestoreFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    await prepareRestoreFile(event.target.files?.[0])
+  }
+
+  const chooseNativeRestoreFile = async () => {
+    try {
+      await prepareRestoreFile(await pickImportFile('json'))
+    } catch (error) {
+      setError(readableError(error))
+    }
+  }
+
   const restoreBackup = () => {
     if (!restoreFile || !restorePreview?.canRestore) return
     void run('restore', async () => {
@@ -297,7 +311,7 @@ export function DataPage() {
       )
       let safetyDownloadError: unknown
       try {
-        downloadBlob(
+        await downloadBlob(
           backupBlob(restoreResult.preRestoreBackup),
           timestampFilename('mousekeeper-exact-before-restore', 'json')
         )
@@ -330,8 +344,7 @@ export function DataPage() {
     })
   }
 
-  const chooseCsvFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
+  const prepareCsvFile = async (file: File | undefined) => {
     setCsvFile(file)
     setCsvPreview(undefined)
     setImportReport(undefined)
@@ -347,6 +360,18 @@ export function DataPage() {
       setMapping(suggestMouseFieldMapping(preview.headers))
     } catch (parseError) {
       setError(readableError(parseError))
+    }
+  }
+
+  const chooseCsvFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    await prepareCsvFile(event.target.files?.[0])
+  }
+
+  const chooseNativeCsvFile = async () => {
+    try {
+      await prepareCsvFile(await pickImportFile('csv'))
+    } catch (error) {
+      setError(readableError(error))
     }
   }
 
@@ -372,7 +397,7 @@ export function DataPage() {
     kind: 'mice' | 'cages' | 'experiments' | 'weights' | 'events'
   ) => {
     if (!inventory) return
-    void run(`csv:${kind}`, () => {
+    void run(`csv:${kind}`, async () => {
       const cageById = new Map(
         inventory.cages.map((cage) => [cage.id, cage])
       )
@@ -480,11 +505,10 @@ export function DataPage() {
             }))
         )
       }
-      downloadBlob(
+      await downloadBlob(
         createCsvBlob(csv),
         timestampFilename(`mousekeeper-${kind}`, 'csv')
       )
-      return Promise.resolve()
     })
   }
 
@@ -704,7 +728,7 @@ export function DataPage() {
                 <p>先验证格式、版本、引用关系、计数和 SHA-256。</p>
               </div>
             </header>
-            <label className="file-drop">
+            <label className="file-drop" onClick={(event) => { if (nativeApp) { event.preventDefault(); void chooseNativeRestoreFile() } }}>
               <Upload aria-hidden="true" size={22} />
               <span>
                 <strong>选择 MouseKeeper JSON 备份</strong>
@@ -789,7 +813,7 @@ export function DataPage() {
               <p>UTF-8、UTF-8 BOM 和中英文表头均可；错误行不会阻断其他有效行。</p>
             </div>
           </header>
-          <label className="file-drop">
+          <label className="file-drop" onClick={(event) => { if (nativeApp) { event.preventDefault(); void chooseNativeCsvFile() } }}>
             <FileUp aria-hidden="true" size={22} />
             <span>
               <strong>{csvFile?.name ?? '选择 CSV 文件'}</strong>

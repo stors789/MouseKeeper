@@ -1,6 +1,6 @@
 # MouseKeeper
 
-MouseKeeper 是面向个人实验人员的本地优先小鼠群体管理 PWA。它覆盖小鼠档案、笼位、繁育、实验、事件、体重、任务、备份恢复和 CSV 交换，不需要账号或后端服务。
+MouseKeeper 是面向个人实验人员的本地优先小鼠群体管理应用，提供 Web/PWA 与 Tauri 2 原生壳（Windows、macOS、Android、iPhone/iPad）。它覆盖小鼠档案、笼位、繁育、实验、事件、体重、任务、备份恢复和 CSV 交换，不需要账号或业务后端。
 
 业务数据默认只保存在当前浏览器配置的 IndexedDB 中。应用不会自动把实验数据上传到网络；清除站点数据、删除浏览器配置或设备损坏仍可能造成数据丢失，因此请定期下载完整 JSON 备份并保存到独立位置。
 
@@ -39,6 +39,13 @@ MouseKeeper 是面向个人实验人员的本地优先小鼠群体管理 PWA。�
     npm run preview
 
 默认预览地址通常为 http://localhost:4173。生产模式会注册 Service Worker；首次在线访问并等待其接管后，可以测试离线重载。
+
+原生桌面开发与构建：
+
+    npm run tauri:dev
+    npm run tauri:build
+
+Android/iOS 初始化、工具链、签名、凭据保险库和已验证范围详见 [Tauri 2 原生 App](docs/native-app.md)。
 
 ## 质量检查
 
@@ -81,7 +88,7 @@ Service Worker 只缓存版本化应用壳和明确的同源静态资源，不�
 ## 数据与隐私
 
 - IndexedDB 数据库名和产品版本集中配置在 src/config/app.ts。
-- localStorage 保存主题、列表偏好、非秘密 Provider 配置，以及用户明确选择“保存在本机”时的 API Key；核心业务记录始终不保存在 localStorage。
+- Web/PWA 的 localStorage 保存主题、列表偏好、非秘密 Provider 配置，以及用户明确选择浏览器风险模式时的 API Key；原生 App 明确禁止把 API Key 写入 localStorage/sessionStorage，只允许进程内存或口令解锁的 Stronghold 加密保险库。
 - 数据导出全部在浏览器本地生成；仓库不包含真实实验数据、数据库转储、密钥或 Token。
 - 使用远程 LLM 时，用户命令和被工具按需读取的业务数据会发送到该 Provider；API Key 与秘密请求头不会作为模型上下文。
 - JSON 校验和用于发现意外损坏，不是加密、数字签名或来源认证。需要保密时，应使用操作系统加密磁盘或加密归档保护备份文件。
@@ -114,5 +121,6 @@ Service Worker 只缓存版本化应用壳和明确的同源静态资源，不�
 - [Agent 使用说明](docs/agent.md)
 - [LLM Provider 与自定义 API](docs/llm-providers.md)
 - [Agent 隐私与本地存储](docs/agent-privacy.md)
+- [Tauri 2 原生 App 与发布](docs/native-app.md)
 
 MouseKeeper v0.1.0 不是受监管 LIMS、医疗器械或合规记录系统，也不提供云同步、多用户权限、电子签名或自动远程备份。

@@ -13,6 +13,8 @@ import { secretStore } from '../../agent/provider/secret-store'
 import { ProviderError, type ConnectionReport, type LLMPreset, type ProviderHeader, type ProviderProfile, type ProviderSettingsDocument, type SecretStoragePolicy } from '../../agent/provider/types'
 import { CHAT_COMPATIBLE_CAPABILITIES, OPENAI_RESPONSES_CAPABILITIES } from '../../agent/provider/defaults'
 import { readableError } from '../../lib/errors'
+import { isNativeApp } from '../../platform/runtime'
+import { pickImportFile } from '../../platform/files'
 
 function useProviderSettings(): ProviderSettingsDocument {
   return useSyncExternalStore(
@@ -43,6 +45,7 @@ function serializedHeaders(profile: ProviderProfile | undefined): string {
 }
 
 export function AgentSettingsPanel() {
+  const nativeApp = isNativeApp()
   const settings = useProviderSettings()
   const initialPreset = settings.presets.find((item) => item.id === settings.defaultPresetId) ?? settings.presets[0]
   const initialProfile = settings.profiles.find((item) => item.id === initialPreset?.providerProfileId) ?? settings.profiles[0]
@@ -50,7 +53,9 @@ export function AgentSettingsPanel() {
   const [presetId, setPresetId] = useState(initialPreset?.id ?? '')
   const [secret, setSecret] = useState('')
   const [showSecret, setShowSecret] = useState(false)
-  const [secretPolicy, setSecretPolicy] = useState<SecretStoragePolicy>(() => initialProfile?.secretRef ? secretStore.metadata(initialProfile.secretRef).policy : 'prompt')
+  const [secretPolicy, setSecretPolicy] = useState<SecretStoragePolicy>(() => nativeApp ? 'platform' : initialProfile?.secretRef ? secretStore.metadata(initialProfile.secretRef).policy : 'prompt')
+  const [vaultPassword, setVaultPassword] = useState('')
+  const [vaultUnlocked, setVaultUnlocked] = useState(secretStore.platformUnlocked)
   const [headersJson, setHeadersJson] = useState(() => serializedHeaders(initialProfile))
   const [providerParamsJson, setProviderParamsJson] = useState(() => JSON.stringify(initialPreset?.providerParameters ?? {}, null, 2))
   const [busy, setBusy] = useState<string>()
@@ -66,7 +71,7 @@ export function AgentSettingsPanel() {
     const next = settings.profiles.find((item) => item.id === id)
     setProfileId(id)
     setHeadersJson(serializedHeaders(next))
-    setSecretPolicy(next?.secretRef ? secretStore.metadata(next.secretRef).policy : 'prompt')
+    setSecretPolicy(nativeApp ? 'platform' : next?.secretRef ? secretStore.metadata(next.secretRef).policy : 'prompt')
     updateDocument((document) => ({
       ...document,
       presets: document.presets.map((item) => item.id === preset.id
@@ -83,7 +88,7 @@ export function AgentSettingsPanel() {
       const nextProfile = settings.profiles.find((item) => item.id === next.providerProfileId)
       setProfileId(next.providerProfileId)
       setHeadersJson(serializedHeaders(nextProfile))
-      setSecretPolicy(nextProfile?.secretRef ? secretStore.metadata(nextProfile.secretRef).policy : 'prompt')
+      setSecretPolicy(nativeApp ? 'platform' : nextProfile?.secretRef ? secretStore.metadata(nextProfile.secretRef).policy : 'prompt')
     }
   }
 
@@ -109,10 +114,30 @@ export function AgentSettingsPanel() {
     }))
   }
 
-  const saveSecret = () => {
+  const platformSecretRefs = settings.profiles.flatMap((item) => [
+    ...(item.secretRef ? [item.secretRef] : []),
+    ...item.customHeaders.flatMap((header) => header.secretRef ? [header.secretRef] : [])
+  ])
+
+  const unlockVault = async () => {
+    setBusy('vault')
+    try {
+      await secretStore.unlockPlatform(vaultPassword, platformSecretRefs)
+      setVaultPassword('')
+      setVaultUnlocked(true)
+      setMessage({ tone: 'positive', title: '原生凭据保险库已解锁', detail: '凭据只在本次 App 进程内解密使用。' })
+    } catch (error) {
+      setMessage({ tone: 'critical', title: '保险库解锁失败', detail: readableError(error) })
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
+  const saveSecret = async () => {
     try {
       const secretRef = profile.secretRef ?? `provider-${profile.id}`
-      secretStore.set(secretRef, secret, secretPolicy)
+      if (secretPolicy === 'platform') await secretStore.setPlatform(secretRef, secret)
+      else secretStore.set(secretRef, secret, secretPolicy)
       updateProfile({ secretRef })
       setSecret('')
       setMessage({ tone: 'positive', title: 'API Key 已保存', detail: '密钥不会进入业务备份、Agent 历史或模型上下文。' })
@@ -121,11 +146,12 @@ export function AgentSettingsPanel() {
     }
   }
 
-  const saveHeaders = () => {
+  const saveHeaders = async () => {
     try {
       const parsed: unknown = JSON.parse(headersJson)
       if (!Array.isArray(parsed)) throw new Error('请求头必须是 JSON 数组')
-      const headers: ProviderHeader[] = parsed.map((value, index) => {
+      const headers: ProviderHeader[] = []
+      for (const [index, value] of parsed.entries()) {
         if (!value || typeof value !== 'object') throw new Error(`第 ${index + 1} 个请求头无效`)
         const source = value as Record<string, unknown>
         const secretHeader = source.secret === true
@@ -138,10 +164,13 @@ export function AgentSettingsPanel() {
           const existingRef = profile.customHeaders[index]?.secretRef
           const valueText = typeof source.value === 'string' ? source.value : ''
           header.secretRef = existingRef ?? `header-${profile.id}-${header.id}`
-          if (valueText) secretStore.set(header.secretRef, valueText, secretPolicy)
+          if (valueText) {
+            if (secretPolicy === 'platform') await secretStore.setPlatform(header.secretRef, valueText)
+            else secretStore.set(header.secretRef, valueText, secretPolicy)
+          }
         } else header.value = typeof source.value === 'string' ? source.value : ''
-        return header
-      })
+        headers.push(header)
+      }
       updateProfile({ customHeaders: headers })
       setMessage({ tone: 'positive', title: '自定义请求头已保存' })
     } catch (error) {
@@ -174,7 +203,7 @@ export function AgentSettingsPanel() {
     updateDocument((document) => ({ ...document, profiles: [...document.profiles, copy] }))
     setProfileId(copy.id)
     setHeadersJson('[]')
-    setSecretPolicy('prompt')
+    setSecretPolicy(nativeApp ? 'platform' : 'prompt')
   }
 
   const deletePreset = () => {
@@ -216,8 +245,7 @@ export function AgentSettingsPanel() {
     }
   }
 
-  const importSettings = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
+  const importSettingsFile = async (file: File | undefined) => {
     if (!file) return
     try {
       const imported = providerSettingsStore.importWithoutSecrets(await file.text())
@@ -226,13 +254,28 @@ export function AgentSettingsPanel() {
       setProfileId(nextProfile.id)
       setPresetId(nextPreset.id)
       setHeadersJson(serializedHeaders(nextProfile))
-      setSecretPolicy('prompt')
+      setSecretPolicy(nativeApp ? 'platform' : 'prompt')
       setProviderParamsJson(JSON.stringify(nextPreset.providerParameters, null, 2))
       setMessage({ tone: 'positive', title: '非秘密配置已导入', detail: '所有 API Key 状态已重置，请按需重新输入。' })
     } catch (error) {
       setMessage({ tone: 'critical', title: '配置导入失败', detail: readableError(error) })
-    } finally {
-      event.target.value = ''
+    }
+  }
+
+  const importSettings = async (event: ChangeEvent<HTMLInputElement>) => {
+    await importSettingsFile(event.target.files?.[0])
+    event.target.value = ''
+  }
+
+  const chooseSettingsImport = async () => {
+    if (!nativeApp) {
+      importRef.current?.click()
+      return
+    }
+    try {
+      await importSettingsFile(await pickImportFile('json'))
+    } catch (error) {
+      setMessage({ tone: 'critical', title: '配置导入失败', detail: readableError(error) })
     }
   }
 
@@ -281,14 +324,21 @@ export function AgentSettingsPanel() {
               <Button aria-label={showSecret ? '隐藏 API Key' : '显示 API Key'} size="icon" variant="tertiary" leadingIcon={showSecret ? <EyeOff aria-hidden="true" size={16} /> : <Eye aria-hidden="true" size={16} />} onClick={() => setShowSecret((value) => !value)}>{showSecret ? '隐藏 API Key' : '显示 API Key'}</Button>
             </div>
             <div className="agent-secret-box__actions">
-              <Select ariaLabel="API Key 保存方式" value={secretPolicy} options={[
+              <Select ariaLabel="API Key 保存方式" value={secretPolicy} options={nativeApp ? [
+                { value: 'platform', label: '原生加密保险库' },
+                { value: 'prompt', label: '仅保留到 App 关闭' }
+              ] : [
                 { value: 'prompt', label: '仅保留到页面关闭' },
                 { value: 'session', label: '本次标签页会话' },
                 { value: 'local', label: '保存在此浏览器（有风险）' }
               ]} onValueChange={(value) => setSecretPolicy(value as SecretStoragePolicy)} />
-              <Button size="small" disabled={!secret} onClick={saveSecret}>保存 Key</Button>
-              <Button size="small" variant="tertiary" disabled={!profile.secretRef} onClick={() => { if (profile.secretRef) secretStore.clear(profile.secretRef); setMessage({ tone: 'warning', title: 'API Key 已清除' }) }}>清除</Button>
+              <Button size="small" disabled={!secret || (secretPolicy === 'platform' && !vaultUnlocked)} onClick={() => void saveSecret()}>保存 Key</Button>
+              <Button size="small" variant="tertiary" disabled={!profile.secretRef || (nativeApp && !vaultUnlocked)} onClick={() => void (async () => { try { if (profile.secretRef) { if (nativeApp) await secretStore.clearPlatform(profile.secretRef); else secretStore.clear(profile.secretRef); updateProfile({ secretRef: undefined }) } setMessage({ tone: 'warning', title: 'API Key 已清除' }) } catch (error) { setMessage({ tone: 'critical', title: 'API Key 未清除', detail: readableError(error) }) } })()}>清除</Button>
             </div>
+            {nativeApp && !vaultUnlocked ? <div className="agent-secret-box__input">
+              <Input aria-label="凭据保险库口令" autoComplete="current-password" placeholder="输入保险库口令以解锁" type="password" value={vaultPassword} onChange={(event) => setVaultPassword(event.target.value)} />
+              <Button size="small" loading={busy === 'vault'} disabled={!vaultPassword} onClick={() => void unlockVault()}>解锁保险库</Button>
+            </div> : null}
           </div>
         ) : null}
         <div className="agent-settings__actions">
@@ -303,8 +353,8 @@ export function AgentSettingsPanel() {
       <details className="agent-settings__advanced agent-settings__advanced--all">
         <summary>高级设置与配置管理</summary>
         <p className="agent-settings__advanced-intro">仅在使用自定义兼容接口、调优生成参数或管理多套预设时需要。</p>
-        <Alert title="浏览器密钥边界" tone="warning">
-          浏览器直连仅作兼容模式；运行中的同源脚本和扩展可能读取密钥。优先使用持钥网关或本地服务。
+        <Alert title={nativeApp ? '原生密钥边界' : '浏览器密钥边界'} tone="warning">
+          {nativeApp ? '原生持久密钥只写入 Stronghold 加密保险库，必须在每次 App 启动后用口令解锁；不会退回 Web Storage。仍优先使用持钥网关或本地服务。' : '浏览器直连仅作兼容模式；运行中的同源脚本和扩展可能读取密钥。优先使用持钥网关或本地服务。'}
         </Alert>
         <div className="agent-settings__columns">
           <div className="agent-settings__panel">
@@ -329,7 +379,7 @@ export function AgentSettingsPanel() {
             <Field id="agent-stream-dialect" label="流式响应格式"><Select value={profile.streamDialect} options={[{ value: 'openai-sse', label: 'OpenAI SSE' }, { value: 'jsonl', label: 'JSONL' }]} onValueChange={(value) => updateProfile({ streamDialect: value as ProviderProfile['streamDialect'] })} /></Field>
             <Field id="agent-headers" label="自定义请求头 JSON"><Textarea rows={5} value={headersJson} onChange={(event) => setHeadersJson(event.target.value)} /></Field>
             <div className="agent-settings__actions">
-              <Button size="small" variant="secondary" onClick={saveHeaders}>保存请求头</Button>
+              <Button size="small" variant="secondary" onClick={() => void saveHeaders()}>保存请求头</Button>
               <Button size="small" variant="secondary" loading={busy === 'models'} leadingIcon={<ListRestart aria-hidden="true" size={15} />} onClick={() => void runConnection('models')}>获取模型列表</Button>
             </div>
             <label className="agent-check"><input type="checkbox" checked={profile.directBrowserRiskAccepted} onChange={(event) => updateProfile({ directBrowserRiskAccepted: event.target.checked })} /><span>我了解浏览器直连密钥的风险</span></label>
@@ -354,8 +404,8 @@ export function AgentSettingsPanel() {
           </div>
         </div>
         <div className="agent-settings__actions agent-settings__transfer">
-          <Button size="small" variant="secondary" leadingIcon={<Download aria-hidden="true" size={15} />} onClick={() => downloadBlob(new Blob([providerSettingsStore.exportWithoutSecrets()], { type: 'application/json' }), 'mousekeeper-llm-settings.json')}>导出配置</Button>
-          <Button size="small" variant="secondary" leadingIcon={<Upload aria-hidden="true" size={15} />} onClick={() => importRef.current?.click()}>导入配置</Button>
+          <Button size="small" variant="secondary" leadingIcon={<Download aria-hidden="true" size={15} />} onClick={() => void downloadBlob(new Blob([providerSettingsStore.exportWithoutSecrets()], { type: 'application/json' }), 'mousekeeper-llm-settings.json')}>导出配置</Button>
+          <Button size="small" variant="secondary" leadingIcon={<Upload aria-hidden="true" size={15} />} onClick={() => void chooseSettingsImport()}>导入配置</Button>
           <input ref={importRef} className="sr-only" type="file" accept=".json,application/json" onChange={(event) => void importSettings(event)} />
         </div>
       </details>
