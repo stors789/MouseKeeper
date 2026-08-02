@@ -15,6 +15,18 @@ function isDocument(value: unknown): value is ProviderSettingsDocument {
   return candidate.version === 1 && Array.isArray(candidate.profiles) && Array.isArray(candidate.presets) && typeof candidate.defaultPresetId === 'string'
 }
 
+const SENSITIVE_FIELD = /(api[_-]?key|authorization|secret|password|(?:access|refresh)[_-]?token)|^token$/i
+const SENSITIVE_HEADER = /(authorization|api[-_]?key|token|secret|password)/i
+
+function containsEmbeddedSecret(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  if (Array.isArray(value)) return value.some(containsEmbeddedSecret)
+  return Object.entries(value).some(([key, child]) =>
+    (SENSITIVE_FIELD.test(key) && typeof child === 'string' && child.length > 0) ||
+    containsEmbeddedSecret(child)
+  )
+}
+
 export class ProviderSettingsStore {
   readonly #listeners = new Set<Listener>()
   #memory?: ProviderSettingsDocument
@@ -63,6 +75,16 @@ export class ProviderSettingsStore {
     )) {
       throw new Error('秘密请求头的原文不得进入 Provider 设置')
     }
+    if (normalized.profiles.some((profile) =>
+      profile.customHeaders.some((header) =>
+        !header.secret && Boolean(header.value) && SENSITIVE_HEADER.test(header.name)
+      )
+    )) {
+      throw new Error('认证类请求头必须标记为秘密并通过凭据存储保存')
+    }
+    if (normalized.presets.some((preset) => containsEmbeddedSecret(preset.providerParameters))) {
+      throw new Error('Provider 特有参数不得包含 API Key、Token 或密码字段')
+    }
     this.#memory = clone(normalized)
     this.storage?.setItem(PROVIDER_SETTINGS_STORAGE_KEY, serialized)
     this.#listeners.forEach((listener) => listener())
@@ -93,7 +115,17 @@ export class ProviderSettingsStore {
   }
 
   exportWithoutSecrets(): string {
-    return JSON.stringify(this.get(), null, 2)
+    const sanitized = this.get()
+    sanitized.profiles = sanitized.profiles.map((profile) => ({
+      ...profile,
+      secretRef: undefined,
+      customHeaders: profile.customHeaders.map((header) => ({
+        ...header,
+        secretRef: undefined,
+        value: header.secret ? undefined : header.value
+      }))
+    }))
+    return JSON.stringify(sanitized, null, 2)
   }
 
   importWithoutSecrets(serialized: string): ProviderSettingsDocument {

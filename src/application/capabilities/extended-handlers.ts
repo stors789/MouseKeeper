@@ -227,7 +227,7 @@ export function registerExtendedCapabilities(
           const backup = await exportDatabaseBackup(database)
           const blob = backupBlob(backup)
           const name = timestampFilename('mousekeeper-backup', 'json')
-          downloadBlob(blob, name)
+          await downloadBlob(blob, name)
           return { status: 'succeeded', capabilityId: item.id, summary: `已下载完整备份，共 ${Object.values(backup.tableCounts).reduce((sum, count) => sum + count, 0)} 条记录`, data: { fileName: name, tableCounts: backup.tableCounts, checksum: backup.integrity.canonicalPayloadDigest }, affected: [], artifacts: [{ id: crypto.randomUUID(), name, mediaType: blob.type, size: blob.size, kind: 'download' }], warnings: [], modifiesData: true }
         }
         if (item.id === 'data.csv.export') {
@@ -235,7 +235,7 @@ export function registerExtendedCapabilities(
           const output = await buildCsvExport(database, kind)
           const blob = createCsvBlob(output.csv)
           const name = timestampFilename(`mousekeeper-${kind}`, 'csv')
-          downloadBlob(blob, name)
+          await downloadBlob(blob, name)
           return { status: 'succeeded', capabilityId: item.id, summary: `已导出 ${output.rowCount} 行 ${kind} CSV`, data: { kind, rowCount: output.rowCount, fileName: name }, affected: [], artifacts: [{ id: crypto.randomUUID(), name, mediaType: blob.type, size: blob.size, kind: 'download' }], warnings: [], modifiesData: false }
         }
         if (item.id === 'data.file.request') {
@@ -263,7 +263,7 @@ export function registerExtendedCapabilities(
           const restored = await restoreDatabaseBackup(database, file)
           const safetyBlob = backupBlob(restored.preRestoreBackup)
           const name = timestampFilename('mousekeeper-exact-before-agent-restore', 'json')
-          downloadBlob(safetyBlob, name)
+          await downloadBlob(safetyBlob, name)
           return { status: 'succeeded', capabilityId: item.id, summary: `已恢复 ${preview.summary?.totalRecords ?? 0} 条记录，并下载恢复前安全副本`, data: { preview: preview.summary, safetyFileName: name }, affected: [], artifacts: [{ id: crypto.randomUUID(), name, mediaType: safetyBlob.type, size: safetyBlob.size, kind: 'download' }], warnings: [], modifiesData: true }
         }
         if (item.id === 'data.csv.preview') {

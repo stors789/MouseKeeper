@@ -31,7 +31,9 @@ Base URL 不会自动追加 `/v1`。模型列表不可用不妨碍手工输入�
 - 每次启动输入：仅存在当前页面内存，刷新后丢失。
 - 仅本次标签页会话：保存到 sessionStorage，标签页会话结束后丢失。
 - 保存在本机浏览器：保存到 localStorage，方便但风险最高。
-- 平台安全存储：当前纯浏览器 PWA 没有可用实现，因此明确禁用。
+- 平台加密保险库：只在 Tauri App 中可用。使用 Stronghold 加密持久化，必须在每次 App 启动后输入保险库口令；错误或不可用时不会退回 Web Storage。
+
+原生 App 明确禁用 sessionStorage/localStorage 密钥持久化。Stronghold 提供静态加密，但当前 Provider 请求仍在 WebView 进程中短暂使用解密后的 Key，因此安全默认仍是无需客户端持有上游 Key 的用户网关。详见 [原生 App](native-app.md)。
 
 界面支持显示/隐藏正在输入的 Key、保存或替换、清除和连接测试。设置页与 Agent 只能读取“是否配置、掩码后四位、保存策略”，不能读取原文。Agent 不能把一个已持钥 Provider 改指向其他端点、认证方式或秘密请求头。
 
